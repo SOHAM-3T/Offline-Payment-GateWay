@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Register | Offline Payment Gateway</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      
+      .container {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        max-width: 500px;
+        width: 100%;
+        padding: 40px;
+      }
+      
+      .logo {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      
+      .logo h1 {
+        color: #667eea;
+        font-size: 32px;
+        margin-bottom: 10px;
+      }
+      
+      .logo p {
+        color: #666;
+        font-size: 14px;
+      }
+      
+      .role-selector {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+        margin-bottom: 30px;
+      }
+      
+      .role-option {
+        padding: 20px;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.3s;
+        background: white;
+      }
+      
+      .role-option:hover {
+        border-color: #667eea;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+      }
+      
+      .role-option.selected {
+        border-color: #667eea;
+        background: #f0f4ff;
+      }
+      
+      .role-option .icon {
+        font-size: 32px;
+        margin-bottom: 10px;
+      }
+      
+      .role-option .title {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+      }
+      
+      .role-option .desc {
+        font-size: 12px;
+        color: #666;
+      }
+      
+      .form-group {
+        margin-bottom: 20px;
+      }
+      
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: #333;
+        font-weight: 500;
+        font-size: 14px;
+      }
+      
+      .form-group input {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+      }
+      
+      .form-group input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+      
+      .btn {
+        width: 100%;
+        padding: 14px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      }
+      
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+      
+      .message {
+        margin-top: 15px;
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 14px;
+        text-align: center;
+      }
+      
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      
+      .message.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+      
+      .config-section {
+        margin-top: 30px;
+        padding-top: 30px;
+        border-top: 1px solid #e0e0e0;
+      }
+      
+      .config-section h3 {
+        font-size: 14px;
+        color: #666;
+        margin-bottom: 10px;
+      }
+      
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="logo">
+        <h1>💳 Payment Gateway</h1>
+        <p>Secure Offline Payment System</p>
+      </div>
+      
+      <div class="role-selector">
+        <div class="role-option" data-role="sender">
+          <div class="icon">👤</div>
+          <div class="title">Sender</div>
+          <div class="desc">Make Payments</div>
+        </div>
+        <div class="role-option" data-role="receiver">
+          <div class="icon">🏪</div>
+          <div class="title">Receiver</div>
+          <div class="desc">Receive Payments</div>
+        </div>
+      </div>
+      
+      <form id="registration-form" class="hidden">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="full-name" required placeholder="John Doe" />
+        </div>
+        
+        <div class="form-group">
+          <label>Email or Phone</label>
+          <input type="text" id="email-phone" required placeholder="john@example.com or +1234567890" />
+        </div>
+        
+        <div class="form-group">
+          <label>Bank ID</label>
+          <input type="text" id="bank-id" required placeholder="USER123456" />
+        </div>
+        
+        <div class="form-group">
+          <label>Wallet Amount</label>
+          <input type="number" id="wallet-amount" step="0.01" min="0" required placeholder="1000.00" value="1000" />
+        </div>
+        
+        <button type="submit" class="btn" id="register-btn">Register & Create Wallet</button>
+      </form>
+      
+      <div id="message" class="message hidden"></div>
+      
+      <div class="config-section">
+        <h3>Bank API Configuration</h3>
+        <div class="form-group">
+          <input type="text" id="bank-api-url" placeholder="http://localhost:4000" value="http://localhost:4000" />
+        </div>
+      </div>
+    </div>
+    
+    <script type="module" src="register.js"></script>
+  </body>
+</html>
+

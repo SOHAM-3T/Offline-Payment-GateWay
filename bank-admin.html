@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bank Admin | Payment Gateway</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: #f5f7fa;
+        min-height: 100vh;
+      }
+      
+      .header {
+        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+        color: white;
+        padding: 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      
+      .header-content {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      
+      .header h1 {
+        font-size: 24px;
+        margin-bottom: 5px;
+      }
+      
+      .header p {
+        opacity: 0.9;
+        font-size: 14px;
+      }
+      
+      .container {
+        max-width: 1400px;
+        margin: 30px auto;
+        padding: 0 20px;
+      }
+      
+      .tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #e0e0e0;
+      }
+      
+      .tab {
+        padding: 12px 24px;
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        font-size: 16px;
+        font-weight: 600;
+        color: #666;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+      
+      .tab:hover {
+        color: #2c3e50;
+      }
+      
+      .tab.active {
+        color: #2c3e50;
+        border-bottom-color: #2c3e50;
+      }
+      
+      .tab-content {
+        display: none;
+      }
+      
+      .tab-content.active {
+        display: block;
+      }
+      
+      .card {
+        background: white;
+        border-radius: 16px;
+        padding: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+      
+      .card h2 {
+        font-size: 20px;
+        margin-bottom: 20px;
+        color: #333;
+      }
+      
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      
+      .table th,
+      .table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+      }
+      
+      .table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        color: #555;
+      }
+      
+      .table tr:hover {
+        background: #f8f9fa;
+      }
+      
+      .btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .btn-success {
+        background: #28a745;
+        color: white;
+      }
+      
+      .btn-danger {
+        background: #dc3545;
+        color: white;
+      }
+      
+      .btn-primary {
+        background: #007bff;
+        color: white;
+      }
+      
+      .btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      }
+      
+      .status-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      
+      .status-badge.pending {
+        background: #fff3cd;
+        color: #856404;
+      }
+      
+      .status-badge.approved {
+        background: #d4edda;
+        color: #155724;
+      }
+      
+      .status-badge.rejected {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      
+      .config-section {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #e0e0e0;
+      }
+      
+      .config-section input {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        width: 100%;
+        max-width: 400px;
+      }
+      
+      .message {
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        font-size: 14px;
+      }
+      
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+      }
+      
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="header-content">
+        <h1>🏦 Bank Admin Dashboard</h1>
+        <p>Manage KYC, Wallets, and Settlements</p>
+      </div>
+    </div>
+    
+    <div class="container">
+      <div class="config-section card">
+        <h2>Configuration</h2>
+        <label>Bank API URL:</label>
+        <input type="text" id="bank-api-url" value="http://localhost:4000" />
+        <button class="btn btn-primary" id="save-config" style="margin-top: 10px;">Save</button>
+      </div>
+      
+      <div class="tabs">
+        <button class="tab active" data-tab="kyc">KYC Approvals</button>
+        <button class="tab" data-tab="wallets">Wallet Approvals</button>
+        <button class="tab" data-tab="settlements">Settlements</button>
+        <button class="tab" data-tab="logs">Audit Logs</button>
+      </div>
+      
+      <div id="kyc-tab" class="tab-content active">
+        <div class="card">
+          <h2>Pending KYC Registrations</h2>
+          <div id="kyc-list"></div>
+        </div>
+      </div>
+      
+      <div id="wallets-tab" class="tab-content">
+        <div class="card">
+          <h2>Pending Wallet Requests</h2>
+          <div id="wallets-list"></div>
+        </div>
+      </div>
+      
+      <div id="settlements-tab" class="tab-content">
+        <div class="card">
+          <h2>Ledger Settlement</h2>
+          <p style="color: #666; margin-bottom: 20px;">Upload encrypted ledger file from receiver for settlement</p>
+          <input type="file" id="ledger-file" accept="application/json,.json" />
+          <button class="btn btn-primary" id="settle-btn" style="margin-top: 10px;">Verify & Settle</button>
+          <div id="settlement-result"></div>
+        </div>
+      </div>
+      
+      <div id="logs-tab" class="tab-content">
+        <div class="card">
+          <h2>Audit Logs</h2>
+          <div id="logs-list"></div>
+        </div>
+      </div>
+    </div>
+    
+    <script type="module" src="bank-admin.js"></script>
+  </body>
+</html>
+

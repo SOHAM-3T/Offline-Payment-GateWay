@@ -11,4 +11,5 @@ dist
 
 # Bank audit spillover
 bank/audit-log.jsonl
-
+__pycache__/
+*.pyc

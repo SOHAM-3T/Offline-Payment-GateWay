@@ -52,7 +52,8 @@ def compute_transaction_hash(txn: dict) -> str:
         'to_id': txn.get('to_id', ''),
         'amount': amount_val,
         'timestamp': txn.get('timestamp', ''),
-        'prev_hash': txn.get('prev_hash') or ''  # Empty string if null/empty
+        'prev_hash': txn.get('prev_hash') or '',  # Empty string if null/empty
+        'wallet_id': txn.get('wallet_id') or ''  # Empty string if null/empty (for backward compatibility)
     }
     # Match frontend JSON.stringify format (no spaces, specific order)
     # Python 3.7+ maintains dict insertion order, so this matches JS object literal order

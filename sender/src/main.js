@@ -45,24 +45,54 @@ function attachHandlers() {
       alert('Please import receiver public key first');
       return;
     }
-    const toId = document.querySelector('#to-id').value.trim();
-    const amount = Number(document.querySelector('#amount').value);
-    if (!toId || !amount || Number.isNaN(amount)) {
-      alert('Receiver ID and amount are required');
+    
+    // Check wallet
+    if (!walletInfo || walletInfo.status !== 'approved') {
+      alert('Please request and get approval for an offline wallet first');
       return;
     }
+    
+    const toId = document.querySelector('#to-id').value.trim();
+    const amount = Number(document.querySelector('#amount').value);
+    if (!toId || !amount || Number.isNaN(amount) || amount <= 0) {
+      alert('Receiver ID and valid amount are required');
+      return;
+    }
+    
+    // Check wallet balance
+    if (walletInfo.current_balance < amount) {
+      alert(`Insufficient wallet balance. Available: ${walletInfo.current_balance}, Required: ${amount}`);
+      return;
+    }
+    
     try {
-      const encryptedTxn = await createEncryptedSignedTransaction({ toId, amount });
+      const encryptedTxn = await createEncryptedSignedTransaction({ 
+        toId, 
+        amount,
+        walletId: walletInfo.wallet_id 
+      });
       lastEncryptedTxn = encryptedTxn;
       previewDiv.innerHTML = `<pre>${JSON.stringify(encryptedTxn, null, 2)}</pre>`;
       exportBtn.disabled = false;
+      
+      // Update local wallet balance (offline tracking)
+      walletInfo.current_balance -= amount;
+      walletInfo.used_amount = (walletInfo.used_amount || 0) + amount;
+      await saveWalletInfo();
+      await renderWalletStatus();
+      
       await logEvent({
         actor: 'sender',
         action: 'create_encrypted_txn',
         txn_id: encryptedTxn.txn_id || 'pending',
         status: 'success',
         connectivity: 'offline',
-        details: { message: 'Transaction encrypted, signed and ready to export' }
+        details: { 
+          message: 'Transaction encrypted, signed and ready to export',
+          wallet_id: walletInfo.wallet_id,
+          amount: amount,
+          remaining_balance: walletInfo.current_balance
+        }
       });
       await renderLogs();
     } catch (err) {
@@ -266,8 +296,8 @@ async function importKeyPair(privateJwk, publicJwk) {
   return { privateKey, publicKey };
 }
 
-async function createEncryptedSignedTransaction({ toId, amount }) {
-  const deviceId = localStorage.getItem('sender_device_id');
+async function createEncryptedSignedTransaction({ toId, amount, walletId }) {
+  const deviceId = userInfo ? userInfo.bank_id : localStorage.getItem('sender_device_id');
   const { privateKey } = cachedKeyPair || (await generateAndStoreKeys(false));
   const publicJwk = cachedPublicJwk;
   const { privateKey: ecdhPrivateKey } = await ensureECDHKeyPair();
@@ -280,7 +310,8 @@ async function createEncryptedSignedTransaction({ toId, amount }) {
     to_id: toId,
     amount,
     timestamp: new Date().toISOString(),
-    prev_hash: prevHash
+    prev_hash: prevHash,
+    wallet_id: walletId || null
   };
 
   // Step 2: Compute SHA-256 hash
@@ -350,7 +381,8 @@ function canonicalTransactionString(txn) {
     to_id: txn.to_id,
     amount: Number(txn.amount),
     timestamp: txn.timestamp,
-    prev_hash: txn.prev_hash ?? ''
+    prev_hash: txn.prev_hash ?? '',
+    wallet_id: txn.wallet_id ?? ''
   };
   return JSON.stringify(ordered);
 }
@@ -393,6 +425,210 @@ async function renderLogs() {
     rows.length === 0
       ? '<p class="muted small">No logs yet.</p>'
       : `<pre>${JSON.stringify(rows, null, 2)}</pre>`;
+}
+
+// KYC Functions
+async function registerKYC(fullName, emailOrPhone, bankId) {
+  if (!cachedPublicJwk) {
+    await generateAndStoreKeys(false);
+  }
+  
+  const response = await fetch(`${BANK_API_URL}/kyc/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      full_name: fullName,
+      email_or_phone: emailOrPhone,
+      role: 'sender',
+      bank_id: bankId,
+      public_key_jwk: cachedPublicJwk
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'KYC registration failed');
+  }
+  
+  const result = await response.json();
+  userInfo = {
+    user_id: result.user_id,
+    full_name: fullName,
+    email_or_phone: emailOrPhone,
+    bank_id: bankId,
+    kyc_status: result.kyc_status
+  };
+  localStorage.setItem('sender_user_info', JSON.stringify(userInfo));
+  
+  kycMessageDiv.textContent = result.message;
+  kycMessageDiv.style.color = 'green';
+  await renderKYCStatus();
+  await logEvent({
+    actor: 'sender',
+    action: 'kyc_register',
+    status: 'success',
+    connectivity: 'online',
+    details: { user_id: result.user_id, kyc_status: result.kyc_status }
+  });
+}
+
+async function loadUserInfo() {
+  const stored = localStorage.getItem('sender_user_info');
+  if (stored) {
+    userInfo = JSON.parse(stored);
+    // Check KYC status from bank
+    if (userInfo.user_id) {
+      try {
+        const response = await fetch(`${BANK_API_URL}/kyc/users/${userInfo.user_id}`);
+        if (response.ok) {
+          const updated = await response.json();
+          userInfo.kyc_status = updated.kyc_status;
+          localStorage.setItem('sender_user_info', JSON.stringify(userInfo));
+        }
+      } catch (e) {
+        console.warn('Failed to check KYC status:', e);
+      }
+    }
+  }
+}
+
+async function renderKYCStatus() {
+  if (userInfo) {
+    kycStatusDiv.innerHTML = `
+      <div><strong>User ID:</strong> ${userInfo.user_id}</div>
+      <div><strong>Name:</strong> ${userInfo.full_name}</div>
+      <div><strong>Bank ID:</strong> ${userInfo.bank_id}</div>
+      <div><strong>KYC Status:</strong> <span style="color: ${userInfo.kyc_status === 'approved' ? 'green' : 'orange'}">${userInfo.kyc_status}</span></div>
+    `;
+    kycForm.style.display = userInfo.kyc_status === 'approved' ? 'none' : 'block';
+  } else {
+    kycStatusDiv.innerHTML = '<p class="muted small">Not registered. Please register for KYC.</p>';
+    kycForm.style.display = 'block';
+  }
+}
+
+// Wallet Functions
+async function requestWallet(limit) {
+  if (!userInfo || !userInfo.user_id) {
+    throw new Error('Please complete KYC registration first');
+  }
+  if (userInfo.kyc_status !== 'approved') {
+    throw new Error('KYC must be approved before requesting wallet');
+  }
+  
+  const response = await fetch(`${BANK_API_URL}/wallets/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_id: userInfo.user_id,
+      requested_limit: limit
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Wallet request failed');
+  }
+  
+  const result = await response.json();
+  walletInfo = {
+    wallet_id: result.wallet_id,
+    user_id: userInfo.user_id,
+    status: result.status,
+    approved_limit: 0,
+    current_balance: 0
+  };
+  await saveWalletInfo();
+  
+  walletMessageDiv.textContent = result.message;
+  walletMessageDiv.style.color = 'green';
+  await renderWalletStatus();
+  await logEvent({
+    actor: 'sender',
+    action: 'wallet_request',
+    status: 'success',
+    connectivity: 'online',
+    details: { wallet_id: result.wallet_id, requested_limit: limit }
+  });
+}
+
+async function loadWalletInfo() {
+  const stored = localStorage.getItem('sender_wallet_info');
+  if (stored) {
+    walletInfo = JSON.parse(stored);
+    // Refresh wallet balance from bank
+    if (walletInfo && walletInfo.wallet_id) {
+      try {
+        await refreshWalletBalance();
+      } catch (e) {
+        console.warn('Failed to refresh wallet balance:', e);
+      }
+    }
+  }
+}
+
+async function refreshWalletBalance() {
+  if (!walletInfo || !walletInfo.wallet_id) return;
+  
+  try {
+    const response = await fetch(`${BANK_API_URL}/wallets/${walletInfo.wallet_id}`);
+    if (response.ok) {
+      const updated = await response.json();
+      walletInfo = {
+        wallet_id: updated.wallet_id,
+        user_id: updated.user_id,
+        status: updated.status,
+        approved_limit: updated.approved_limit,
+        current_balance: updated.current_balance,
+        used_amount: updated.used_amount,
+        locked_amount: updated.locked_amount
+      };
+      await saveWalletInfo();
+      await renderWalletStatus();
+    }
+  } catch (e) {
+    console.warn('Failed to refresh wallet:', e);
+  }
+}
+
+async function saveWalletInfo() {
+  if (walletInfo) {
+    localStorage.setItem('sender_wallet_info', JSON.stringify(walletInfo));
+    const db = await openDb();
+    const tx = db.transaction(WALLET_STORE, 'readwrite');
+    const store = tx.objectStore(WALLET_STORE);
+    await store.put(walletInfo);
+    await tx.complete;
+  }
+}
+
+async function renderWalletStatus() {
+  if (walletInfo) {
+    walletStatusDiv.innerHTML = `
+      <div><strong>Wallet ID:</strong> ${walletInfo.wallet_id}</div>
+      <div><strong>Status:</strong> <span style="color: ${walletInfo.status === 'approved' ? 'green' : 'orange'}">${walletInfo.status}</span></div>
+      ${walletInfo.status === 'approved' ? `
+        <div><strong>Approved Limit:</strong> ${walletInfo.approved_limit}</div>
+        <div><strong>Current Balance:</strong> ${walletInfo.current_balance}</div>
+        <div><strong>Used Amount:</strong> ${walletInfo.used_amount}</div>
+      ` : ''}
+    `;
+    walletForm.style.display = walletInfo.status === 'approved' ? 'none' : 'block';
+    
+    if (walletInfo.status === 'approved') {
+      walletBalanceDiv.innerHTML = `
+        <div style="font-size: 1.2em; font-weight: bold; color: ${walletInfo.current_balance > 0 ? 'green' : 'red'}">
+          Available Balance: ${walletInfo.current_balance}
+        </div>
+      `;
+    } else {
+      walletBalanceDiv.innerHTML = '';
+    }
+  } else {
+    walletStatusDiv.innerHTML = '<p class="muted small">No wallet. Please request a wallet.</p>';
+    walletForm.style.display = userInfo && userInfo.kyc_status === 'approved' ? 'block' : 'none';
+    walletBalanceDiv.innerHTML = '';
+  }
 }
 
 function openDb() {

@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Receiver | Payment Gateway</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: #f5f7fa;
+        min-height: 100vh;
+      }
+      
+      .header {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        padding: 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      
+      .header-content {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .header h1 {
+        font-size: 24px;
+        margin-bottom: 5px;
+      }
+      
+      .header p {
+        opacity: 0.9;
+        font-size: 14px;
+      }
+      
+      .total-card {
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(10px);
+        padding: 15px 20px;
+        border-radius: 12px;
+        text-align: right;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      
+      .total-label {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 5px;
+        font-weight: 500;
+      }
+      
+      .total-amount {
+        font-size: 28px;
+        font-weight: 700;
+        color: white;
+      }
+      
+      .container {
+        max-width: 1200px;
+        margin: 30px auto;
+        padding: 0 20px;
+      }
+      
+      .card {
+        background: white;
+        border-radius: 16px;
+        padding: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+      
+      .card h2 {
+        font-size: 20px;
+        margin-bottom: 20px;
+        color: #333;
+      }
+      
+      .scan-section {
+        text-align: center;
+        padding: 40px;
+        background: #f8f9fa;
+        border-radius: 12px;
+        border: 2px dashed #dee2e6;
+      }
+      
+      .file-input-wrapper {
+        position: relative;
+        display: inline-block;
+      }
+      
+      .file-input-wrapper input[type="file"] {
+        position: absolute;
+        opacity: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+      }
+      
+      .file-input-label {
+        display: inline-block;
+        padding: 14px 28px;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+      
+      .file-input-label:hover {
+        transform: translateY(-2px);
+      }
+      
+      .btn {
+        padding: 14px 28px;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+      }
+      
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+      
+      .btn-secondary {
+        background: #6c757d;
+      }
+      
+      .message {
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-top: 15px;
+        font-size: 14px;
+      }
+      
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+      }
+      
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      
+      .ledger-item {
+        padding: 15px;
+        border-bottom: 1px solid #e0e0e0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .ledger-item:last-child {
+        border-bottom: none;
+      }
+      
+      .status-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      
+      .status-badge.verified {
+        background: #d4edda;
+        color: #155724;
+      }
+      
+      .status-badge.pending {
+        background: #fff3cd;
+        color: #856404;
+      }
+      
+      .hidden {
+        display: none;
+      }
+      
+      .payment-card {
+        animation: slideIn 0.5s;
+      }
+      
+      @keyframes slideIn {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      
+      .ledger-item {
+        padding: 16px;
+        border-bottom: 1px solid #f0f0f0;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        transition: background 0.2s;
+      }
+      
+      .ledger-item:hover {
+        background: #f8f9fa;
+      }
+      
+      .ledger-item:last-child {
+        border-bottom: none;
+      }
+      
+      .ledger-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+      }
+      
+      .ledger-details {
+        flex: 1;
+      }
+      
+      .ledger-name {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 4px;
+      }
+      
+      .ledger-time {
+        font-size: 12px;
+        color: #999;
+      }
+      
+      .ledger-amount {
+        font-size: 18px;
+        font-weight: 700;
+        color: #28a745;
+      }
+      
+      .success-animation {
+        animation: successPulse 0.6s;
+      }
+      
+      @keyframes successPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      
+      @media (max-width: 768px) {
+        .header-content {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 15px;
+        }
+        
+        .payment-card {
+          padding: 30px 20px !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="header-content">
+        <div>
+          <h1>🏪 Receiver Dashboard</h1>
+          <p>Receive and manage payments</p>
+        </div>
+        <div class="total-card">
+          <div class="total-label">Total Received</div>
+          <div class="total-amount" id="total-display">₹0.00</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="container">
+      <!-- Google Pay Style Receive Interface -->
+      <div class="card payment-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 40px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <div style="font-size: 64px; margin-bottom: 10px;">📱</div>
+          <h2 style="color: white; font-size: 24px; margin-bottom: 5px;">Receive Payment</h2>
+          <p style="opacity: 0.9; font-size: 14px;">Scan QR code or import payment</p>
+        </div>
+        
+        <div class="scan-section" style="background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); border: 2px dashed rgba(255,255,255,0.3); padding: 40px; border-radius: 16px;">
+          <div class="file-input-wrapper">
+            <input type="file" id="file-input" accept="application/json,.json" />
+            <label for="file-input" class="file-input-label" style="background: white; color: #f5576c; padding: 18px 32px; font-size: 16px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+              📁 Choose Payment File
+            </label>
+          </div>
+          <p style="color: rgba(255,255,255,0.8); margin-top: 20px; font-size: 12px;">Or scan the QR code from sender's device</p>
+        </div>
+        <div id="receive-message" class="message hidden"></div>
+      </div>
+      
+      <!-- Connection Code (Hidden by default, shown in settings) -->
+      <div class="card hidden" id="config-card" style="background: #e3f2fd; border-left: 4px solid #2196f3;">
+        <h2 style="color: #1976d2;">🔗 Connection Code</h2>
+        <p style="color: #1976d2; margin-bottom: 15px; font-size: 14px;">Share this code with senders to receive payments</p>
+        <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 2px solid #2196f3;">
+          <textarea id="public-key-display" readonly rows="3" style="width: 100%; padding: 12px; border: none; border-radius: 8px; font-family: monospace; font-size: 11px; background: white; resize: none;"></textarea>
+        </div>
+        <button class="btn" id="copy-key-btn" style="background: #2196f3; color: white; width: 100%;">Copy Connection Code</button>
+        <div id="copy-status" style="margin-top: 10px; font-size: 14px;"></div>
+        <button class="btn btn-secondary" id="hide-config-btn" style="margin-top: 10px; width: 100%;">Hide</button>
+      </div>
+      
+      <div class="card" style="text-align: center; padding: 20px; background: #f8f9fa;">
+        <button class="btn btn-secondary" id="show-config-btn" style="background: #6c757d;">Show Connection Code</button>
+      </div>
+      
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2 style="margin: 0;">Payment History</h2>
+          <button class="btn" id="sync-btn" style="padding: 10px 20px; font-size: 14px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+            💾 Sync to Bank
+          </button>
+        </div>
+        <div id="ledger-list">
+          <div style="text-align: center; padding: 40px;">
+            <div style="font-size: 48px; margin-bottom: 10px; opacity: 0.3;">💰</div>
+            <p style="color: #999;">No payments received yet</p>
+            <p style="color: #ccc; font-size: 12px; margin-top: 5px;">Received payments will appear here</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <script type="module" src="receiver-app.js"></script>
+  </body>
+</html>
+

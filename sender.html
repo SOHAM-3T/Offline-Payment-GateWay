@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sender | Payment Gateway</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: #f5f7fa;
+        min-height: 100vh;
+      }
+      
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      
+      .header-content {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .header h1 {
+        font-size: 24px;
+        margin-bottom: 5px;
+      }
+      
+      .header p {
+        opacity: 0.9;
+        font-size: 14px;
+      }
+      
+      .balance-card {
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(10px);
+        padding: 15px 20px;
+        border-radius: 12px;
+        text-align: right;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      
+      .balance-label {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 5px;
+        font-weight: 500;
+      }
+      
+      .balance-amount {
+        font-size: 28px;
+        font-weight: 700;
+        color: white;
+      }
+      
+      .container {
+        max-width: 1200px;
+        margin: 30px auto;
+        padding: 0 20px;
+      }
+      
+      .card {
+        background: white;
+        border-radius: 16px;
+        padding: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+      
+      .card h2 {
+        font-size: 20px;
+        margin-bottom: 20px;
+        color: #333;
+      }
+      
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      
+      .form-group {
+        display: flex;
+        flex-direction: column;
+      }
+      
+      .form-group label {
+        font-size: 14px;
+        font-weight: 600;
+        color: #555;
+        margin-bottom: 8px;
+      }
+      
+      .form-group input {
+        padding: 12px 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+      }
+      
+      .form-group input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+      
+      .btn {
+        padding: 14px 28px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      }
+      
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+      
+      .btn-secondary {
+        background: #6c757d;
+      }
+      
+      .message {
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-top: 15px;
+        font-size: 14px;
+      }
+      
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+      }
+      
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      
+      .qr-section {
+        text-align: center;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 12px;
+        margin-top: 20px;
+      }
+      
+      #qrcode {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 280px;
+      }
+      
+      #qrcode canvas {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+      
+      #qrcode-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .status-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      
+      .status-badge.success {
+        background: #d4edda;
+        color: #155724;
+      }
+      
+      .status-badge.pending {
+        background: #fff3cd;
+        color: #856404;
+      }
+      
+      .hidden {
+        display: none !important;
+      }
+      
+      /* Google Pay Style Modal */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(5px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        animation: fadeIn 0.3s;
+      }
+      
+      .modal-content {
+        background: white;
+        border-radius: 24px;
+        padding: 30px;
+        max-width: 400px;
+        width: 90%;
+        animation: slideUp 0.3s;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      
+      @keyframes slideUp {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      
+      .payment-card {
+        animation: slideIn 0.5s;
+      }
+      
+      @keyframes slideIn {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      
+      .transaction-item {
+        padding: 16px;
+        border-bottom: 1px solid #f0f0f0;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        transition: background 0.2s;
+      }
+      
+      .transaction-item:hover {
+        background: #f8f9fa;
+      }
+      
+      .transaction-item:last-child {
+        border-bottom: none;
+      }
+      
+      .transaction-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+      }
+      
+      .transaction-details {
+        flex: 1;
+      }
+      
+      .transaction-name {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 4px;
+      }
+      
+      .transaction-time {
+        font-size: 12px;
+        color: #999;
+      }
+      
+      .transaction-amount {
+        font-size: 18px;
+        font-weight: 700;
+        color: #667eea;
+      }
+      
+      @media (max-width: 768px) {
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+        
+        .header-content {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 15px;
+        }
+        
+        .payment-card {
+          padding: 30px 20px !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="header-content">
+        <div>
+          <h1>👤 Sender Dashboard</h1>
+          <p>Make secure offline payments</p>
+        </div>
+        <div class="balance-card">
+          <div class="balance-label">Available Balance</div>
+          <div class="balance-amount" id="balance-display">₹0.00</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="container">
+      <!-- Google Pay Style Payment Interface -->
+      <div class="card payment-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <div style="font-size: 48px; margin-bottom: 10px;">💳</div>
+          <h2 style="color: white; font-size: 24px; margin-bottom: 5px;">Send Money</h2>
+          <p style="opacity: 0.9; font-size: 14px;">Secure offline payment</p>
+        </div>
+        
+        <form id="payment-form">
+          <div class="form-group" style="margin-bottom: 20px;">
+            <label style="color: rgba(255,255,255,0.9); font-size: 14px; margin-bottom: 8px;">To</label>
+            <input type="text" id="receiver-id" required placeholder="Enter receiver ID" 
+                   style="width: 100%; padding: 16px; border: 2px solid rgba(255,255,255,0.3); border-radius: 12px; font-size: 16px; background: rgba(255,255,255,0.1); color: white; backdrop-filter: blur(10px);" />
+            <style>
+              #receiver-id::placeholder { color: rgba(255,255,255,0.6); }
+              #receiver-id:focus { outline: none; border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.15); }
+            </style>
+          </div>
+          
+          <div class="form-group" style="margin-bottom: 30px;">
+            <label style="color: rgba(255,255,255,0.9); font-size: 14px; margin-bottom: 8px;">Amount</label>
+            <div style="position: relative;">
+              <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 24px; font-weight: 700; color: white;">₹</span>
+              <input type="number" id="amount" step="0.01" min="0.01" required placeholder="0.00" 
+                     style="width: 100%; padding: 16px 16px 16px 50px; border: 2px solid rgba(255,255,255,0.3); border-radius: 12px; font-size: 32px; font-weight: 700; background: rgba(255,255,255,0.1); color: white; backdrop-filter: blur(10px); text-align: right;" />
+              <style>
+                #amount::placeholder { color: rgba(255,255,255,0.4); }
+                #amount:focus { outline: none; border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.15); }
+              </style>
+            </div>
+          </div>
+          
+          <button type="submit" class="btn" id="create-payment-btn" 
+                  style="width: 100%; padding: 18px; background: white; color: #667eea; font-size: 18px; font-weight: 700; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+            Pay Now
+          </button>
+        </form>
+        <div id="payment-message" class="message hidden"></div>
+      </div>
+      
+      <!-- QR Code Modal (Google Pay Style) -->
+      <div class="modal-overlay hidden" id="qr-modal">
+        <div class="modal-content">
+          <div style="text-align: center; padding: 20px;">
+            <h2 style="margin-bottom: 10px; color: #333;">Scan to Pay</h2>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Show this QR code to the receiver or save as file</p>
+            <div id="qrcode-container" style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); min-height: 300px; min-width: 300px; display: flex; align-items: center; justify-content: center;">
+              <div id="qrcode"></div>
+            </div>
+            <div style="margin-top: 15px;">
+              <button class="btn" id="download-qr-btn" style="background: #667eea; color: white; margin-right: 10px;">📥 Download as File</button>
+              <button class="btn btn-secondary" id="close-qr">Done</button>
+            </div>
+            <div id="qr-error" style="margin-top: 15px; color: #dc3545; font-size: 12px; display: none;"></div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Configuration hidden - only shown if receiver key not set -->
+      <div class="card hidden" id="config-card" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+        <h2 style="color: #856404;">⚠️ Setup Required</h2>
+        <p style="color: #856404; margin-bottom: 15px;">Connect with a receiver to start making payments</p>
+        <div class="form-group">
+          <label style="color: #856404;">Receiver Connection Code</label>
+          <input type="text" id="receiver-key-input" style="width: 100%; padding: 12px; border: 2px solid #ffc107; border-radius: 8px; font-size: 14px;" placeholder="Enter receiver connection code" />
+        </div>
+        <button class="btn" id="save-receiver-key-btn" style="background: #ffc107; color: #333;">Connect Receiver</button>
+        <div id="receiver-key-status" style="margin-top: 10px; font-size: 14px;"></div>
+      </div>
+      
+      <div class="card">
+        <h2 style="margin-bottom: 20px;">Recent Transactions</h2>
+        <div id="transactions-list">
+          <div style="text-align: center; padding: 40px;">
+            <div style="font-size: 48px; margin-bottom: 10px; opacity: 0.3;">📱</div>
+            <p style="color: #999;">No transactions yet</p>
+            <p style="color: #ccc; font-size: 12px; margin-top: 5px;">Your payment history will appear here</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Load QRCode library -->
+    <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script type="module" src="sender-app.js"></script>
+  </body>
+</html>
+

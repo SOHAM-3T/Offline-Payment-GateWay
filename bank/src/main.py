@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from typing import Union, List, Dict, Any
+from typing import Union, List, Dict, Any, Optional
 
 from models import (
     LedgerVerificationRequest,
@@ -17,7 +17,15 @@ from models import (
     SettlementResponse,
     Ledger,
     LedgerEntry,
-    LogEntry
+    LogEntry,
+    KYCRegistrationRequest,
+    KYCRegistrationResponse,
+    KYCApprovalRequest,
+    UserResponse,
+    WalletRequest,
+    WalletRequestResponse,
+    WalletApprovalRequest,
+    WalletResponse
 )
 from crypto import verify_hash_chain, check_duplicate_transactions, compute_transaction_hash
 from crypto_bank import (
@@ -27,7 +35,12 @@ from crypto_bank import (
     sha256
 )
 from key_manager import get_or_create_bank_keypair, get_bank_public_key_jwk
-from database import write_audit_log, get_audit_logs, check_transaction_settled
+from database import (
+    write_audit_log, get_audit_logs, check_transaction_settled,
+    create_user, update_user_kyc_status, get_user, get_user_by_bank_id, get_all_users,
+    create_wallet, approve_wallet, get_wallet, get_wallet_by_user_id,
+    update_wallet_balance, settle_transaction_to_wallet, check_wallet_balance_sufficient
+)
 
 # Load environment variables
 load_dotenv()
@@ -58,7 +71,9 @@ async def root():
             "verify": "/verify-ledger",
             "settle": "/settle-ledger",
             "logs": "/bank-logs",
-            "public_key": "/bank-public-key"
+            "public_key": "/bank-public-key",
+            "kyc": "/kyc/register, /kyc/approve, /kyc/users",
+            "wallets": "/wallets/request, /wallets/approve, /wallets/{wallet_id}"
         }
     }
 
@@ -454,26 +469,93 @@ async def settle_ledger(request: Request):
                 errors.append(f"Transaction {txn_id} already settled (replay detected)")
                 continue
             
-            # Settle transaction
-            try:
-                log_id = write_audit_log(
-                    actor="bank",
-                    action="settle",
-                    status="success",
-                    details={
-                        "txn_id": txn_id,
-                        "from_id": txn['from_id'],
-                        "to_id": txn['to_id'],
-                        "amount": txn['amount'],
-                        "receiver_id": receiver_id,
-                        "ledger_index": entry['ledger_index']
-                    },
-                    txn_id=txn_id
-                )
-                settled_txn_ids.append(txn_id)
-                audit_log_ids.append(log_id)
-            except Exception as settle_err:
-                errors.append(f"Failed to settle {txn_id}: {str(settle_err)}")
+            # Wallet verification and escrow settlement
+            wallet_id = txn.get('wallet_id')
+            if wallet_id:
+                # Verify wallet exists and is approved
+                wallet = get_wallet(wallet_id)
+                if not wallet:
+                    errors.append(f"Transaction {txn_id}: Wallet {wallet_id} not found")
+                    continue
+                if wallet['status'] != 'approved':
+                    errors.append(f"Transaction {txn_id}: Wallet {wallet_id} not approved (status: {wallet['status']})")
+                    continue
+                
+                # Verify sufficient locked amount in escrow
+                if float(wallet['locked_amount']) < float(txn['amount']):
+                    errors.append(
+                        f"Transaction {txn_id}: Insufficient locked amount. "
+                        f"Required: {txn['amount']}, Available: {wallet['locked_amount']}"
+                    )
+                    continue
+                
+                # Get user IDs from bank_ids
+                from_user = get_user_by_bank_id(txn['from_id'], 'sender')
+                to_user = get_user_by_bank_id(txn['to_id'], 'receiver')
+                
+                if not from_user:
+                    errors.append(f"Transaction {txn_id}: Sender user not found for bank_id {txn['from_id']}")
+                    continue
+                if not to_user:
+                    errors.append(f"Transaction {txn_id}: Receiver user not found for bank_id {txn['to_id']}")
+                    continue
+                
+                # Settle transaction and deduct from escrow
+                try:
+                    settlement_id = settle_transaction_to_wallet(
+                        txn_id=txn_id,
+                        wallet_id=wallet_id,
+                        from_user_id=from_user['user_id'],
+                        to_user_id=to_user['user_id'],
+                        amount=float(txn['amount']),
+                        ledger_index=entry.get('ledger_index'),
+                        receiver_id=receiver_id
+                    )
+                    
+                    log_id = write_audit_log(
+                        actor="bank",
+                        action="settle",
+                        status="success",
+                        details={
+                            "txn_id": txn_id,
+                            "wallet_id": wallet_id,
+                            "from_id": txn['from_id'],
+                            "to_id": txn['to_id'],
+                            "amount": txn['amount'],
+                            "receiver_id": receiver_id,
+                            "ledger_index": entry.get('ledger_index'),
+                            "settlement_id": settlement_id
+                        },
+                        txn_id=txn_id
+                    )
+                    settled_txn_ids.append(txn_id)
+                    audit_log_ids.append(log_id)
+                except ValueError as settle_err:
+                    errors.append(f"Failed to settle {txn_id}: {str(settle_err)}")
+                except Exception as settle_err:
+                    errors.append(f"Failed to settle {txn_id}: {str(settle_err)}")
+            else:
+                # Legacy transaction without wallet_id - still settle but log warning
+                try:
+                    log_id = write_audit_log(
+                        actor="bank",
+                        action="settle",
+                        status="success",
+                        details={
+                            "txn_id": txn_id,
+                            "from_id": txn['from_id'],
+                            "to_id": txn['to_id'],
+                            "amount": txn['amount'],
+                            "receiver_id": receiver_id,
+                            "ledger_index": entry.get('ledger_index'),
+                            "warning": "Legacy transaction without wallet_id"
+                        },
+                        txn_id=txn_id
+                    )
+                    settled_txn_ids.append(txn_id)
+                    audit_log_ids.append(log_id)
+                except Exception as settle_err:
+                    errors.append(f"Failed to settle {txn_id}: {str(settle_err)}")
         
         # Write summary log
         try:
@@ -531,6 +613,522 @@ async def get_bank_logs(limit: int = 100, offset: int = 0):
             status_code=500,
             detail=f"Failed to retrieve logs: {str(e)}"
         )
+
+
+# KYC Endpoints
+@app.post("/kyc/register", response_model=KYCRegistrationResponse)
+async def register_kyc(request: KYCRegistrationRequest):
+    """
+    Register a new user (sender or receiver) with KYC information.
+    Binds user identity to their public key.
+    """
+    try:
+        if request.role not in ['sender', 'receiver']:
+            raise HTTPException(status_code=400, detail="Role must be 'sender' or 'receiver'")
+        
+        user_id = create_user(
+            full_name=request.full_name,
+            email_or_phone=request.email_or_phone,
+            role=request.role,
+            bank_id=request.bank_id,
+            public_key_jwk=request.public_key_jwk
+        )
+        
+        write_audit_log(
+            actor="bank",
+            action="kyc_register",
+            status="success",
+            details={
+                "user_id": user_id,
+                "role": request.role,
+                "bank_id": request.bank_id
+            }
+        )
+        
+        return KYCRegistrationResponse(
+            user_id=user_id,
+            kyc_status="pending",
+            message="KYC registration submitted. Awaiting approval."
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="kyc_register",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@app.post("/kyc/approve")
+async def approve_kyc(request: KYCApprovalRequest):
+    """
+    Approve or reject a KYC registration.
+    """
+    try:
+        if request.kyc_status not in ['approved', 'rejected']:
+            raise HTTPException(status_code=400, detail="kyc_status must be 'approved' or 'rejected'")
+        
+        updated = update_user_kyc_status(request.user_id, request.kyc_status)
+        if not updated:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        write_audit_log(
+            actor="bank",
+            action="kyc_approve",
+            status="success",
+            details={
+                "user_id": request.user_id,
+                "kyc_status": request.kyc_status,
+                "notes": request.notes
+            }
+        )
+        
+        return {"message": f"KYC {request.kyc_status}", "user_id": request.user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="kyc_approve",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Approval failed: {str(e)}")
+
+
+@app.get("/kyc/users", response_model=List[UserResponse])
+async def list_users(kyc_status: Optional[str] = None):
+    """
+    List all users, optionally filtered by kyc_status.
+    """
+    try:
+        users = get_all_users(kyc_status=kyc_status)
+        return [UserResponse(**user) for user in users]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve users: {str(e)}")
+
+
+@app.get("/kyc/users/{user_id}", response_model=UserResponse)
+async def get_user_info(user_id: str):
+    """
+    Get user information by user_id.
+    """
+    try:
+        user = get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return UserResponse(**user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve user: {str(e)}")
+
+
+# Wallet Endpoints
+@app.post("/wallets/request", response_model=WalletRequestResponse)
+async def request_wallet(request: WalletRequest):
+    """
+    Request creation of an offline wallet.
+    User must have approved KYC.
+    """
+    try:
+        # Check if user exists and is approved
+        user = get_user(request.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if user['kyc_status'] != 'approved':
+            raise HTTPException(
+                status_code=400,
+                detail=f"User KYC must be approved. Current status: {user['kyc_status']}"
+            )
+        
+        # Check if wallet already exists
+        existing_wallet = get_wallet_by_user_id(request.user_id)
+        if existing_wallet:
+            raise HTTPException(status_code=400, detail="Wallet already exists for this user")
+        
+        wallet_id = create_wallet(request.user_id, request.requested_limit)
+        
+        write_audit_log(
+            actor="bank",
+            action="wallet_request",
+            status="success",
+            details={
+                "wallet_id": wallet_id,
+                "user_id": request.user_id,
+                "requested_limit": request.requested_limit
+            }
+        )
+        
+        return WalletRequestResponse(
+            wallet_id=wallet_id,
+            status="pending",
+            message="Wallet request submitted. Awaiting approval."
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="wallet_request",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Wallet request failed: {str(e)}")
+
+
+@app.post("/wallets/approve")
+async def approve_wallet_request(request: WalletApprovalRequest):
+    """
+    Approve a wallet request and lock the escrow amount.
+    """
+    try:
+        if request.status not in ['approved', 'rejected']:
+            raise HTTPException(status_code=400, detail="status must be 'approved' or 'rejected'")
+        
+        wallet = get_wallet(request.wallet_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        
+        if request.status == 'approved':
+            updated = approve_wallet(request.wallet_id, request.approved_limit)
+            if not updated:
+                raise HTTPException(status_code=500, detail="Failed to approve wallet")
+        else:
+            # Reject wallet
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE wallets
+                        SET status = 'rejected', updated_at = NOW()
+                        WHERE wallet_id = %s
+                        """,
+                        (request.wallet_id,)
+                    )
+                    conn.commit()
+            finally:
+                conn.close()
+        
+        write_audit_log(
+            actor="bank",
+            action="wallet_approve",
+            status="success",
+            details={
+                "wallet_id": request.wallet_id,
+                "status": request.status,
+                "approved_limit": request.approved_limit if request.status == 'approved' else None,
+                "notes": request.notes
+            }
+        )
+        
+        return {"message": f"Wallet {request.status}", "wallet_id": request.wallet_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="wallet_approve",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Wallet approval failed: {str(e)}")
+
+
+@app.get("/wallets/{wallet_id}", response_model=WalletResponse)
+async def get_wallet_info(wallet_id: str):
+    """
+    Get wallet information by wallet_id.
+    """
+    try:
+        wallet = get_wallet(wallet_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        return WalletResponse(**wallet)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve wallet: {str(e)}")
+
+
+@app.get("/wallets/user/{user_id}", response_model=WalletResponse)
+async def get_wallet_by_user(user_id: str):
+    """
+    Get wallet information by user_id.
+    """
+    try:
+        wallet = get_wallet_by_user_id(user_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found for this user")
+        return WalletResponse(**wallet)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve wallet: {str(e)}")
+
+
+# KYC Endpoints
+@app.post("/kyc/register", response_model=KYCRegistrationResponse)
+async def register_kyc(request: KYCRegistrationRequest):
+    """
+    Register a new user (sender or receiver) with KYC information.
+    Binds user identity to their public key.
+    """
+    try:
+        if request.role not in ['sender', 'receiver']:
+            raise HTTPException(status_code=400, detail="Role must be 'sender' or 'receiver'")
+        
+        user_id = create_user(
+            full_name=request.full_name,
+            email_or_phone=request.email_or_phone,
+            role=request.role,
+            bank_id=request.bank_id,
+            public_key_jwk=request.public_key_jwk
+        )
+        
+        write_audit_log(
+            actor="bank",
+            action="kyc_register",
+            status="success",
+            details={
+                "user_id": user_id,
+                "role": request.role,
+                "bank_id": request.bank_id
+            }
+        )
+        
+        return KYCRegistrationResponse(
+            user_id=user_id,
+            kyc_status="pending",
+            message="KYC registration submitted. Awaiting approval."
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="kyc_register",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@app.post("/kyc/approve")
+async def approve_kyc(request: KYCApprovalRequest):
+    """
+    Approve or reject a KYC registration.
+    """
+    try:
+        if request.kyc_status not in ['approved', 'rejected']:
+            raise HTTPException(status_code=400, detail="kyc_status must be 'approved' or 'rejected'")
+        
+        updated = update_user_kyc_status(request.user_id, request.kyc_status)
+        if not updated:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        write_audit_log(
+            actor="bank",
+            action="kyc_approve",
+            status="success",
+            details={
+                "user_id": request.user_id,
+                "kyc_status": request.kyc_status,
+                "notes": request.notes
+            }
+        )
+        
+        return {"message": f"KYC {request.kyc_status}", "user_id": request.user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="kyc_approve",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Approval failed: {str(e)}")
+
+
+@app.get("/kyc/users", response_model=List[UserResponse])
+async def list_users(kyc_status: Optional[str] = None):
+    """
+    List all users, optionally filtered by kyc_status.
+    """
+    try:
+        users = get_all_users(kyc_status=kyc_status)
+        return [UserResponse(**user) for user in users]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve users: {str(e)}")
+
+
+@app.get("/kyc/users/{user_id}", response_model=UserResponse)
+async def get_user_info(user_id: str):
+    """
+    Get user information by user_id.
+    """
+    try:
+        user = get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return UserResponse(**user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve user: {str(e)}")
+
+
+# Wallet Endpoints
+@app.post("/wallets/request", response_model=WalletRequestResponse)
+async def request_wallet(request: WalletRequest):
+    """
+    Request creation of an offline wallet.
+    User must have approved KYC.
+    """
+    try:
+        # Check if user exists and is approved
+        user = get_user(request.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if user['kyc_status'] != 'approved':
+            raise HTTPException(
+                status_code=400,
+                detail=f"User KYC must be approved. Current status: {user['kyc_status']}"
+            )
+        
+        # Check if wallet already exists
+        existing_wallet = get_wallet_by_user_id(request.user_id)
+        if existing_wallet:
+            raise HTTPException(status_code=400, detail="Wallet already exists for this user")
+        
+        wallet_id = create_wallet(request.user_id, request.requested_limit)
+        
+        write_audit_log(
+            actor="bank",
+            action="wallet_request",
+            status="success",
+            details={
+                "wallet_id": wallet_id,
+                "user_id": request.user_id,
+                "requested_limit": request.requested_limit
+            }
+        )
+        
+        return WalletRequestResponse(
+            wallet_id=wallet_id,
+            status="pending",
+            message="Wallet request submitted. Awaiting approval."
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="wallet_request",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Wallet request failed: {str(e)}")
+
+
+@app.post("/wallets/approve")
+async def approve_wallet_request(request: WalletApprovalRequest):
+    """
+    Approve a wallet request and lock the escrow amount.
+    """
+    try:
+        if request.status not in ['approved', 'rejected']:
+            raise HTTPException(status_code=400, detail="status must be 'approved' or 'rejected'")
+        
+        wallet = get_wallet(request.wallet_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        
+        if request.status == 'approved':
+            updated = approve_wallet(request.wallet_id, request.approved_limit)
+            if not updated:
+                raise HTTPException(status_code=500, detail="Failed to approve wallet")
+        else:
+            # Reject wallet
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE wallets
+                        SET status = 'rejected', updated_at = NOW()
+                        WHERE wallet_id = %s
+                        """,
+                        (request.wallet_id,)
+                    )
+                    conn.commit()
+            finally:
+                conn.close()
+        
+        write_audit_log(
+            actor="bank",
+            action="wallet_approve",
+            status="success",
+            details={
+                "wallet_id": request.wallet_id,
+                "status": request.status,
+                "approved_limit": request.approved_limit if request.status == 'approved' else None,
+                "notes": request.notes
+            }
+        )
+        
+        return {"message": f"Wallet {request.status}", "wallet_id": request.wallet_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        write_audit_log(
+            actor="bank",
+            action="wallet_approve",
+            status="error",
+            details={"error": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Wallet approval failed: {str(e)}")
+
+
+@app.get("/wallets/{wallet_id}", response_model=WalletResponse)
+async def get_wallet_info(wallet_id: str):
+    """
+    Get wallet information by wallet_id.
+    """
+    try:
+        wallet = get_wallet(wallet_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        return WalletResponse(**wallet)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve wallet: {str(e)}")
+
+
+@app.get("/wallets/user/{user_id}", response_model=WalletResponse)
+async def get_wallet_by_user(user_id: str):
+    """
+    Get wallet information by user_id.
+    """
+    try:
+        wallet = get_wallet_by_user_id(user_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found for this user")
+        return WalletResponse(**wallet)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve wallet: {str(e)}")
 
 
 if __name__ == "__main__":
