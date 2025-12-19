@@ -27,11 +27,19 @@ const bankKeyTextarea = document.querySelector('#bank-public-key');
 const saveBankKeyBtn = document.querySelector('#save-bank-key');
 const bankKeyStatus = document.querySelector('#bank-key-status');
 
+// KYC elements
+const kycStatusDiv = document.querySelector('#kyc-status');
+const kycForm = document.querySelector('#kyc-form');
+const kycMessageDiv = document.querySelector('#kyc-message');
+
+const BANK_API_URL = localStorage.getItem('bank_api_url') || 'http://localhost:4000';
+
 let cachedKeyPair = null;
 let cachedPublicJwk = null;
 let cachedECDHKeyPair = null;
 let cachedECDHPublicJwk = null; // ECDH public key for export
 let bankPublicKeyJwk = null;
+let userInfo = null;
 
 init().catch(console.error);
 
@@ -39,7 +47,9 @@ async function init() {
   await ensureDb();
   await ensureIdentity();
   await loadBankPublicKey();
+  await loadUserInfo();
   attachHandlers();
+  await renderKYCStatus();
   await renderLedger();
   await renderLogs();
 }
@@ -143,6 +153,27 @@ function attachHandlers() {
       bankKeyStatus.style.color = 'red';
     }
   });
+
+  // KYC form handler
+  kycForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fullName = document.querySelector('#kyc-full-name').value.trim();
+    const emailOrPhone = document.querySelector('#kyc-email-phone').value.trim();
+    const bankId = document.querySelector('#kyc-bank-id').value.trim();
+    
+    if (!fullName || !emailOrPhone || !bankId) {
+      kycMessageDiv.textContent = 'All fields are required';
+      kycMessageDiv.style.color = 'red';
+      return;
+    }
+    
+    try {
+      await registerKYC(fullName, emailOrPhone, bankId);
+    } catch (err) {
+      kycMessageDiv.textContent = 'Error: ' + err.message;
+      kycMessageDiv.style.color = 'red';
+    }
+  });
 }
 
 async function handleEncryptedTransaction(encryptedData) {
@@ -242,8 +273,9 @@ async function handleEncryptedTransaction(encryptedData) {
 
 async function ensureIdentity() {
   await generateAndStoreKeys(false);
+  const receiverId = userInfo ? userInfo.bank_id : (localStorage.getItem('receiver_id') || 'Not set');
   identityDiv.innerHTML = `
-    <div><strong>Receiver ID:</strong> ${localStorage.getItem('receiver_id') || 'Not set'}</div>
+    <div><strong>Receiver ID:</strong> ${receiverId}</div>
     <div class="small muted">ECDSA P-256 keypair for signing; ECDH keypair for decryption.</div>
   `;
 }
@@ -363,7 +395,8 @@ function canonicalTransactionString(txn) {
     to_id: txn.to_id,
     amount: Number(txn.amount),
     timestamp: txn.timestamp,
-    prev_hash: txn.prev_hash ?? ''
+    prev_hash: txn.prev_hash ?? '',
+    wallet_id: txn.wallet_id ?? ''
   };
   return JSON.stringify(ordered);
 }
@@ -550,6 +583,87 @@ function openDb() {
 }
 
 // Crypto functions moved to crypto-utils.js
+
+// KYC Functions
+async function registerKYC(fullName, emailOrPhone, bankId) {
+  if (!cachedPublicJwk) {
+    await generateAndStoreKeys(false);
+  }
+  
+  const response = await fetch(`${BANK_API_URL}/kyc/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      full_name: fullName,
+      email_or_phone: emailOrPhone,
+      role: 'receiver',
+      bank_id: bankId,
+      public_key_jwk: cachedPublicJwk
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'KYC registration failed');
+  }
+  
+  const result = await response.json();
+  userInfo = {
+    user_id: result.user_id,
+    full_name: fullName,
+    email_or_phone: emailOrPhone,
+    bank_id: bankId,
+    kyc_status: result.kyc_status
+  };
+  localStorage.setItem('receiver_user_info', JSON.stringify(userInfo));
+  
+  kycMessageDiv.textContent = result.message;
+  kycMessageDiv.style.color = 'green';
+  await renderKYCStatus();
+  await ensureIdentity();
+  await logEvent({
+    actor: 'receiver',
+    action: 'kyc_register',
+    status: 'success',
+    connectivity: 'online',
+    details: { user_id: result.user_id, kyc_status: result.kyc_status }
+  });
+}
+
+async function loadUserInfo() {
+  const stored = localStorage.getItem('receiver_user_info');
+  if (stored) {
+    userInfo = JSON.parse(stored);
+    // Check KYC status from bank
+    if (userInfo.user_id) {
+      try {
+        const response = await fetch(`${BANK_API_URL}/kyc/users/${userInfo.user_id}`);
+        if (response.ok) {
+          const updated = await response.json();
+          userInfo.kyc_status = updated.kyc_status;
+          localStorage.setItem('receiver_user_info', JSON.stringify(userInfo));
+        }
+      } catch (e) {
+        console.warn('Failed to check KYC status:', e);
+      }
+    }
+  }
+}
+
+async function renderKYCStatus() {
+  if (userInfo) {
+    kycStatusDiv.innerHTML = `
+      <div><strong>User ID:</strong> ${userInfo.user_id}</div>
+      <div><strong>Name:</strong> ${userInfo.full_name}</div>
+      <div><strong>Bank ID:</strong> ${userInfo.bank_id}</div>
+      <div><strong>KYC Status:</strong> <span style="color: ${userInfo.kyc_status === 'approved' ? 'green' : 'orange'}">${userInfo.kyc_status}</span></div>
+    `;
+    kycForm.style.display = 'none';
+  } else {
+    kycStatusDiv.innerHTML = '<p class="muted small">Not registered. Please register for KYC.</p>';
+    kycForm.style.display = 'block';
+  }
+}
 
 function downloadJSON(filename, data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

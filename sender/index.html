@@ -22,6 +22,41 @@
       </section>
 
       <section class="card">
+        <h2>KYC Registration</h2>
+        <div id="kyc-status"></div>
+        <form id="kyc-form" style="display: none;">
+          <label>
+            Full Name
+            <input id="kyc-full-name" required placeholder="John Doe" />
+          </label>
+          <label>
+            Email or Phone
+            <input id="kyc-email-phone" required placeholder="john@example.com or +1234567890" />
+          </label>
+          <label>
+            Bank ID
+            <input id="kyc-bank-id" required placeholder="BANK123456" />
+          </label>
+          <button type="submit">Register KYC</button>
+        </form>
+        <div id="kyc-message" class="small muted"></div>
+      </section>
+
+      <section class="card">
+        <h2>Offline Wallet</h2>
+        <div id="wallet-status"></div>
+        <form id="wallet-form" style="display: none;">
+          <label>
+            Requested Limit
+            <input id="wallet-limit" type="number" step="0.01" required placeholder="1000.00" />
+          </label>
+          <button type="submit">Request Wallet</button>
+        </form>
+        <div id="wallet-message" class="small muted"></div>
+        <div id="wallet-balance" class="small muted"></div>
+      </section>
+
+      <section class="card">
         <h2>Receiver Public Key</h2>
         <p class="small muted">Import receiver's public key (JWK format) for encryption</p>
         <textarea id="receiver-public-key" placeholder='{"kty":"EC","crv":"P-256",...}' rows="4" style="width: 100%; font-family: monospace; font-size: 0.9em;"></textarea>
