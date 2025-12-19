@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Receiver | Offline Payment Simulation</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Receiver (Merchant)</h1>
+        <p class="muted">
+          Offline ledger app. Imports signed transactions, verifies signatures, appends an immutable hash-chained ledger, and exports ledger JSON for the Bank.
+        </p>
+      </header>
+
+      <section class="card">
+        <h2>Import Transaction File</h2>
+        <input id="file-input" type="file" accept="application/json" />
+        <div id="import-status" class="small muted"></div>
+      </section>
+
+      <section class="card">
+        <h2>Ledger (IndexedDB)</h2>
+        <div id="ledger-view"></div>
+        <button id="export-ledger">Export ledger JSON</button>
+      </section>
+
+      <section class="card">
+        <h2>Logs (IndexedDB)</h2>
+        <div id="logs"></div>
+        <button id="refresh-logs">Refresh logs</button>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+

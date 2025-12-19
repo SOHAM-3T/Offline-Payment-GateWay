@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sender | Offline Payment Simulation</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Sender (Buyer)</h1>
+        <p class="muted">
+          Offline transaction creator. Generates signed payment messages for transfer to the Receiver via file.
+        </p>
+      </header>
+
+      <section class="card">
+        <h2>Device Identity</h2>
+        <div id="identity"></div>
+        <button id="regenerate-keys">Regenerate keypair</button>
+      </section>
+
+      <section class="card">
+        <h2>Create Transaction</h2>
+        <form id="txn-form">
+          <label>
+            Receiver ID
+            <input id="to-id" required placeholder="merchant-123" />
+          </label>
+          <label>
+            Amount
+            <input id="amount" type="number" step="0.01" required placeholder="10.50" />
+          </label>
+          <button type="submit">Create + Sign</button>
+        </form>
+        <div id="txn-preview" class="muted small"></div>
+        <button id="export-txn" disabled>Export signed transaction (JSON)</button>
+      </section>
+
+      <section class="card">
+        <h2>Logs (IndexedDB)</h2>
+        <div id="logs"></div>
+        <button id="refresh-logs">Refresh logs</button>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+
