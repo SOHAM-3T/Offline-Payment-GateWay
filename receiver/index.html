@@ -23,6 +23,27 @@
       </section>
 
       <section class="card">
+        <h2>KYC Registration</h2>
+        <div id="kyc-status"></div>
+        <form id="kyc-form" style="display: none;">
+          <label>
+            Full Name
+            <input id="kyc-full-name" required placeholder="Jane Merchant" />
+          </label>
+          <label>
+            Email or Phone
+            <input id="kyc-email-phone" required placeholder="jane@merchant.com or +1234567890" />
+          </label>
+          <label>
+            Bank ID
+            <input id="kyc-bank-id" required placeholder="MERCHANT123" />
+          </label>
+          <button type="submit">Register KYC</button>
+        </form>
+        <div id="kyc-message" class="small muted"></div>
+      </section>
+
+      <section class="card">
         <h2>Bank Public Key</h2>
         <p class="small muted">Import bank's public key (JWK format) for ledger encryption</p>
         <textarea id="bank-public-key" placeholder='{"kty":"EC","crv":"P-256",...}' rows="4" style="width: 100%; font-family: monospace; font-size: 0.9em;"></textarea>
