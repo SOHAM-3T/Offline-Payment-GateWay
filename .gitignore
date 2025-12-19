@@ -15,6 +15,3 @@ bank/audit-log.jsonl
 
 __pycache__/
 *.pyc
-
-__pycache__/
-*.pyc
