@@ -3,6 +3,7 @@ FastAPI backend service for offline payment settlement.
 Handles ledger verification and transaction settlement.
 """
 import os
+import json
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,7 +19,14 @@ from models import (
     LedgerEntry,
     LogEntry
 )
-from crypto import verify_hash_chain, check_duplicate_transactions
+from crypto import verify_hash_chain, check_duplicate_transactions, compute_transaction_hash
+from crypto_bank import (
+    decrypt_aes_key_with_private_key,
+    decrypt_aes,
+    verify_signature_ecdsa,
+    sha256
+)
+from key_manager import get_or_create_bank_keypair, get_bank_public_key_jwk
 from database import write_audit_log, get_audit_logs, check_transaction_settled
 
 # Load environment variables
@@ -49,20 +57,111 @@ async def root():
         "endpoints": {
             "verify": "/verify-ledger",
             "settle": "/settle-ledger",
-            "logs": "/bank-logs"
+            "logs": "/bank-logs",
+            "public_key": "/bank-public-key"
         }
     }
+
+
+@app.get("/bank-public-key")
+async def get_bank_public_key():
+    """
+    Get bank's public key in JWK format.
+    Receiver needs this to encrypt ledgers for the bank.
+    """
+    try:
+        public_key_jwk = get_bank_public_key_jwk()
+        return {
+            "public_key": public_key_jwk,
+            "format": "JWK",
+            "algorithm": "ECDH P-256",
+            "usage": "Import this key in Receiver app to enable ledger encryption"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get public key: {str(e)}")
+
+
+async def decrypt_encrypted_ledger(encrypted_data: dict) -> tuple[List[Dict], str]:
+    """
+    Decrypt encrypted ledger data.
+    Returns (entries, receiver_id).
+    """
+    try:
+        # Validate required fields
+        if 'encrypted_aes_key' not in encrypted_data:
+            raise ValueError("Missing encrypted_aes_key field")
+        if 'receiver_public_key' not in encrypted_data:
+            raise ValueError("Missing receiver_public_key field (ECDH public key)")
+        if 'encrypted_payload' not in encrypted_data:
+            raise ValueError("Missing encrypted_payload field")
+        if 'iv' not in encrypted_data:
+            raise ValueError("Missing iv field")
+        
+        # Step 1: Decrypt AES key using Bank private key (ECDH)
+        # receiver_public_key should be Receiver's ECDH public key
+        bank_private_key = get_or_create_bank_keypair()
+        
+        try:
+            aes_key_bytes = decrypt_aes_key_with_private_key(
+                encrypted_data['encrypted_aes_key'],
+                encrypted_data['receiver_public_key'],  # This should be ECDH public key
+                bank_private_key
+            )
+        except Exception as key_err:
+            raise ValueError(f"Failed to decrypt AES key: {str(key_err)}. Check that receiver_public_key is Receiver's ECDH public key.")
+        
+        # Step 2: Decrypt payload using AES key
+        try:
+            decrypted_payload = decrypt_aes(
+                encrypted_data['encrypted_payload'],
+                encrypted_data['iv'],
+                aes_key_bytes
+            )
+            signed_data = json.loads(decrypted_payload)
+        except Exception as payload_err:
+            raise ValueError(f"Failed to decrypt payload: {str(payload_err)}")
+        
+        # Step 3: Verify Receiver signature
+        ledger_json = json.dumps(signed_data['ledger'], separators=(',', ':'))
+        expected_hash = sha256(ledger_json)
+        
+        if expected_hash != signed_data['hash']:
+            raise ValueError("Ledger hash mismatch after decryption")
+        
+        receiver_public_key_jwk = signed_data.get('receiver_public_key', encrypted_data.get('receiver_public_key'))
+        signature_valid = verify_signature_ecdsa(
+            signed_data['hash'],
+            signed_data['signature'],
+            receiver_public_key_jwk
+        )
+        
+        if not signature_valid:
+            raise ValueError("Receiver signature verification failed")
+        
+        # Step 4: Extract ledger entries
+        entries = signed_data['ledger']
+        receiver_id = "unknown"  # Could be extracted from entries if available
+        
+        return entries, receiver_id
+        
+    except Exception as e:
+        raise ValueError(f"Decryption failed: {str(e)}")
 
 
 def parse_ledger_data(data: Any) -> tuple[List[Dict], str]:
     """
     Parse ledger data from various formats:
+    - Encrypted: {"encrypted_payload": "...", "encrypted_aes_key": "...", "iv": "...", "receiver_public_key": {...}}
     - Direct array: [{ledger_index: 0, transaction: {...}, ...}, ...]
     - Wrapped: {"ledger": {receiver_id: "...", entries: [...], ...}}
-    - Request model: LedgerVerificationRequest or SettlementRequest
     """
     receiver_id = "unknown"
     entries = []
+    
+    # Handle encrypted format
+    if isinstance(data, dict) and 'encrypted_payload' in data:
+        # This is encrypted - will be handled by caller
+        raise ValueError("Encrypted data detected - use decrypt_encrypted_ledger")
     
     # Handle direct array (most common - as exported by receiver)
     if isinstance(data, list):
@@ -113,11 +212,14 @@ def parse_ledger_data(data: Any) -> tuple[List[Dict], str]:
 async def verify_ledger(request: Request):
     """
     Verify ledger integrity:
+    - Decrypts encrypted ledger if provided
+    - Verifies Receiver signature
     - Hash chain validation
     - Transaction signature verification
     - Duplicate transaction detection
     
     Accepts JSON body as:
+    - Encrypted: {"encrypted_payload": "...", "encrypted_aes_key": "...", "iv": "...", "receiver_public_key": {...}}
     - Direct array: [{"ledger_index": 0, "transaction": {...}, "hash": "...", "status": "..."}, ...]
     - Wrapped: {"ledger": {"receiver_id": "...", "entries": [...], "exported_at": "..."}}
     """
@@ -126,7 +228,27 @@ async def verify_ledger(request: Request):
     
     try:
         data = await request.json()
-        entries, receiver_id = parse_ledger_data(data)
+        
+        # Check if data is encrypted
+        if isinstance(data, dict) and 'encrypted_payload' in data:
+            # Decrypt first
+            try:
+                entries, receiver_id = await decrypt_encrypted_ledger(data)
+                write_audit_log(
+                    actor="bank",
+                    action="decrypt_ledger",
+                    status="success",
+                    details={"message": "Ledger decrypted successfully"}
+                )
+            except Exception as decrypt_err:
+                return LedgerVerificationResponse(
+                    valid=False,
+                    errors=[f"Decryption failed: {str(decrypt_err)}"],
+                    verified_transactions=[]
+                )
+        else:
+            # Parse unencrypted data
+            entries, receiver_id = parse_ledger_data(data)
         
         if not entries:
             return LedgerVerificationResponse(
@@ -140,13 +262,37 @@ async def verify_ledger(request: Request):
         if not chain_valid:
             errors.extend(chain_errors)
         
+        # Verify individual transaction signatures
+        for i, entry in enumerate(entries):
+            txn = entry.get('transaction', {})
+            if not txn:
+                errors.append(f"Entry {i}: Missing transaction data")
+                continue
+            
+            # Verify transaction hash
+            computed_hash = compute_transaction_hash(txn)
+            if computed_hash != txn.get('hash'):
+                errors.append(f"Entry {i}: Transaction hash mismatch")
+            
+            # Verify sender signature
+            sender_pub_key = txn.get('sender_public_key')
+            signature = txn.get('signature')
+            if sender_pub_key and signature:
+                sig_valid = verify_signature_ecdsa(
+                    txn.get('hash', ''),
+                    signature,
+                    sender_pub_key
+                )
+                if not sig_valid:
+                    errors.append(f"Entry {i}: Sender signature invalid")
+        
         # Check for duplicate transactions
         no_duplicates, duplicates = check_duplicate_transactions(entries)
         if not no_duplicates:
             errors.append(f"Duplicate transactions found: {', '.join(duplicates)}")
         
         # Collect verified transaction IDs
-        if chain_valid and no_duplicates:
+        if chain_valid and no_duplicates and len([e for e in errors if 'signature' not in e.lower()]) == 0:
             verified_txn_ids = [
                 entry['transaction']['txn_id'] for entry in entries
             ]
@@ -193,11 +339,14 @@ async def verify_ledger(request: Request):
 async def settle_ledger(request: Request):
     """
     Settle verified transactions:
+    - Decrypts encrypted ledger if provided
+    - Verifies Receiver signature
     - Re-verify ledger integrity
     - Check for already-settled transactions
     - Write settlement audit logs
     
     Accepts JSON body as:
+    - Encrypted: {"encrypted_payload": "...", "encrypted_aes_key": "...", "iv": "...", "receiver_public_key": {...}}
     - Direct array: [{"ledger_index": 0, "transaction": {...}, "hash": "...", "status": "..."}, ...]
     - Wrapped: {"ledger": {"receiver_id": "...", "entries": [...], "exported_at": "..."}}
     """
@@ -207,7 +356,28 @@ async def settle_ledger(request: Request):
     
     try:
         data = await request.json()
-        entries, receiver_id = parse_ledger_data(data)
+        
+        # Check if data is encrypted
+        if isinstance(data, dict) and 'encrypted_payload' in data:
+            # Decrypt first
+            try:
+                entries, receiver_id = await decrypt_encrypted_ledger(data)
+                write_audit_log(
+                    actor="bank",
+                    action="decrypt_ledger",
+                    status="success",
+                    details={"message": "Ledger decrypted successfully"}
+                )
+            except Exception as decrypt_err:
+                return SettlementResponse(
+                    settled=False,
+                    settled_transactions=[],
+                    errors=[f"Decryption failed: {str(decrypt_err)}"],
+                    audit_log_ids=[]
+                )
+        else:
+            # Parse unencrypted data
+            entries, receiver_id = parse_ledger_data(data)
         
         if not entries:
             return SettlementResponse(
@@ -229,10 +399,44 @@ async def settle_ledger(request: Request):
                 audit_log_ids=[]
             )
         
+        # Verify individual transaction signatures
+        for i, entry in enumerate(entries):
+            txn = entry.get('transaction', {})
+            if not txn:
+                errors.append(f"Entry {i}: Missing transaction data")
+                continue
+            
+            # Verify transaction hash
+            computed_hash = compute_transaction_hash(txn)
+            if computed_hash != txn.get('hash'):
+                errors.append(f"Entry {i}: Transaction hash mismatch")
+            
+            # Verify sender signature
+            sender_pub_key = txn.get('sender_public_key')
+            signature = txn.get('signature')
+            if sender_pub_key and signature:
+                sig_valid = verify_signature_ecdsa(
+                    txn.get('hash', ''),
+                    signature,
+                    sender_pub_key
+                )
+                if not sig_valid:
+                    errors.append(f"Entry {i}: Sender signature invalid")
+        
         # Check duplicates
         no_duplicates, duplicates = check_duplicate_transactions(entries)
         if not no_duplicates:
             errors.append(f"Duplicate transactions found: {', '.join(duplicates)}")
+            return SettlementResponse(
+                settled=False,
+                settled_transactions=[],
+                errors=errors,
+                audit_log_ids=[]
+            )
+        
+        # If signature errors, don't settle
+        signature_errors = [e for e in errors if 'signature' in e.lower() or 'hash mismatch' in e.lower()]
+        if signature_errors:
             return SettlementResponse(
                 settled=False,
                 settled_transactions=[],

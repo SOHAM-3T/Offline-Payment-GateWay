@@ -22,6 +22,14 @@
       </section>
 
       <section class="card">
+        <h2>Receiver Public Key</h2>
+        <p class="small muted">Import receiver's public key (JWK format) for encryption</p>
+        <textarea id="receiver-public-key" placeholder='{"kty":"EC","crv":"P-256",...}' rows="4" style="width: 100%; font-family: monospace; font-size: 0.9em;"></textarea>
+        <button id="save-receiver-key">Save Receiver Public Key</button>
+        <div id="receiver-key-status" class="small muted"></div>
+      </section>
+
+      <section class="card">
         <h2>Create Transaction</h2>
         <form id="txn-form">
           <label>
@@ -32,10 +40,10 @@
             Amount
             <input id="amount" type="number" step="0.01" required placeholder="10.50" />
           </label>
-          <button type="submit">Create + Sign</button>
+          <button type="submit">Create + Encrypt + Sign</button>
         </form>
         <div id="txn-preview" class="muted small"></div>
-        <button id="export-txn" disabled>Export signed transaction (JSON)</button>
+        <button id="export-txn" disabled>Export encrypted transaction (JSON)</button>
       </section>
 
       <section class="card">
@@ -46,6 +54,7 @@
     </main>
 
     <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/crypto-utils.js"></script>
   </body>
 </html>
 

@@ -1,6 +1,7 @@
 """
 Cryptographic verification functions for transactions and ledgers.
 Uses hashlib for SHA-256 and cryptography library for ECDSA signature verification.
+Note: For encryption/decryption, see crypto_bank.py
 """
 import base64
 import hashlib

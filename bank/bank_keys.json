@@ -1,0 +1,11 @@
+{
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTHbRV3+5mA0DdkeE\nbQfMglfOb/wi/997UBb7sS557h2hRANCAAQNszY0SiCMLKIq2l5r+ye2vrcgFEqG\nRPm0mU5ft8DRl6LRacXuenpD+7BiI437MzS+11d8B1VfMmlxcXgcaCbx\n-----END PRIVATE KEY-----\n",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDbM2NEogjCyiKtpea/sntr63IBRK\nhkT5tJlOX7fA0Zei0WnF7np6Q/uwYiON+zM0vtdXfAdVXzJpcXF4HGgm8Q==\n-----END PUBLIC KEY-----\n",
+  "public_key_jwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "DbM2NEogjCyiKtpea_sntr63IBRKhkT5tJlOX7fA0Zc",
+    "y": "otFpxe56ekP7sGIjjfszNL7XV3wHVV8yaXFxeBxoJvE",
+    "ext": true
+  }
+}

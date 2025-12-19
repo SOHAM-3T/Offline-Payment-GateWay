@@ -1,3 +1,14 @@
+import {
+  decryptAES,
+  decryptAESKeyWithPrivateKey,
+  sha256Hex,
+  verifySignature,
+  generateAESKey,
+  encryptAES,
+  encryptAESKeyWithPublicKey,
+  signHash
+} from './crypto-utils.js';
+
 const DB_NAME = 'receiver-db';
 const DB_VERSION = 1;
 const LOG_STORE = 'logs';
@@ -9,11 +20,25 @@ const ledgerDiv = document.querySelector('#ledger-view');
 const logsDiv = document.querySelector('#logs');
 const exportBtn = document.querySelector('#export-ledger');
 const refreshLogsBtn = document.querySelector('#refresh-logs');
+const identityDiv = document.querySelector('#identity');
+const regenerateBtn = document.querySelector('#regenerate-keys');
+const exportPublicKeyBtn = document.querySelector('#export-public-key');
+const bankKeyTextarea = document.querySelector('#bank-public-key');
+const saveBankKeyBtn = document.querySelector('#save-bank-key');
+const bankKeyStatus = document.querySelector('#bank-key-status');
+
+let cachedKeyPair = null;
+let cachedPublicJwk = null;
+let cachedECDHKeyPair = null;
+let cachedECDHPublicJwk = null; // ECDH public key for export
+let bankPublicKeyJwk = null;
 
 init().catch(console.error);
 
 async function init() {
   await ensureDb();
+  await ensureIdentity();
+  await loadBankPublicKey();
   attachHandlers();
   await renderLedger();
   await renderLogs();
@@ -25,15 +50,15 @@ function attachHandlers() {
     if (!file) return;
     try {
       const text = await file.text();
-      const txn = JSON.parse(text);
-      await handleTransaction(txn);
-      statusDiv.textContent = 'Imported and processed transaction file.';
+      const encryptedData = JSON.parse(text);
+      await handleEncryptedTransaction(encryptedData);
+      statusDiv.textContent = 'Decrypted, verified, and processed transaction file.';
     } catch (err) {
       console.error(err);
       statusDiv.textContent = 'Failed to process file: ' + err.message;
       await logEvent({
         actor: 'receiver',
-        action: 'import_txn',
+        action: 'import_encrypted_txn',
         status: 'error',
         txn_id: null,
         connectivity: 'offline',
@@ -45,17 +70,146 @@ function attachHandlers() {
     }
   });
 
-  exportBtn.addEventListener('click', exportLedger);
+  exportBtn.addEventListener('click', exportEncryptedLedger);
   refreshLogsBtn.addEventListener('click', renderLogs);
+  
+  regenerateBtn.addEventListener('click', async () => {
+    try {
+      // Clear all key caches
+      cachedKeyPair = null;
+      cachedPublicJwk = null;
+      cachedECDHKeyPair = null;
+      cachedECDHPublicJwk = null;
+      
+      // Remove from localStorage to force regeneration
+      localStorage.removeItem('receiver_keys');
+      localStorage.removeItem('receiver_ecdh_keys');
+      
+      // Regenerate both ECDSA and ECDH keypairs
+      await generateAndStoreKeys(true);
+      await ensureECDHKeyPair();
+      await ensureIdentity();
+      
+      await logEvent({
+        actor: 'receiver',
+        action: 'regen_keys',
+        status: 'success',
+        connectivity: 'offline',
+        details: { 
+          message: 'All Receiver keys regenerated (ECDSA + ECDH). Export new public key and update Sender!' 
+        }
+      });
+      
+      alert('Keys regenerated successfully! Now click "Export Public Key" to get the new ECDH public key for the Sender.');
+      await renderLogs();
+    } catch (err) {
+      console.error('Error regenerating keys:', err);
+      alert('Error regenerating keys: ' + err.message);
+    }
+  });
+  
+  exportPublicKeyBtn.addEventListener('click', async () => {
+    // Ensure ECDH keys are generated
+    await ensureECDHKeyPair();
+    if (!cachedECDHPublicJwk) {
+      alert('Error: ECDH public key not available. Please regenerate keys.');
+      return;
+    }
+    // Export ECDH public key (not ECDSA!) - this is what Sender needs for encryption
+    downloadJSON('receiver-public-key.json', cachedECDHPublicJwk);
+  });
+  
+  saveBankKeyBtn.addEventListener('click', async () => {
+    try {
+      const keyText = bankKeyTextarea.value.trim();
+      if (!keyText) {
+        alert('Please paste bank public key');
+        return;
+      }
+      const keyJwk = JSON.parse(keyText);
+      await crypto.subtle.importKey(
+        'jwk',
+        keyJwk,
+        { name: 'ECDH', namedCurve: 'P-256' },
+        false,
+        []
+      );
+      bankPublicKeyJwk = keyJwk;
+      localStorage.setItem('bank_public_key', keyText);
+      bankKeyStatus.textContent = '✓ Bank public key saved';
+      bankKeyStatus.style.color = 'green';
+    } catch (err) {
+      bankKeyStatus.textContent = '✗ Invalid public key: ' + err.message;
+      bankKeyStatus.style.color = 'red';
+    }
+  });
 }
 
-async function handleTransaction(txn) {
-  validateTxnShape(txn);
-  const verified = await verifyTransactionSignature(txn);
+async function handleEncryptedTransaction(encryptedData) {
+  // Validate encrypted data format
+  if (!encryptedData.encrypted_payload || !encryptedData.encrypted_aes_key || !encryptedData.iv) {
+    throw new Error('Invalid encrypted transaction format. Missing required fields.');
+  }
+  
+  if (!encryptedData.sender_ecdh_public_key) {
+    throw new Error('Missing sender ECDH public key. Transaction may be from old format.');
+  }
+  
+  // Step 1: Decrypt AES key using Receiver private key (ECDH)
+  const { privateKey: ecdhPrivateKey } = await ensureECDHKeyPair();
+  const aesKey = await decryptAESKeyWithPrivateKey(
+    encryptedData.encrypted_aes_key,
+    encryptedData.sender_ecdh_public_key, // Use ECDH public key, not ECDSA
+    ecdhPrivateKey
+  );
+  
+  await logEvent({
+    actor: 'receiver',
+    action: 'decrypt_aes_key',
+    status: 'success',
+    connectivity: 'offline',
+    details: { message: 'AES key decrypted successfully' }
+  });
+  
+  // Step 2: Decrypt payload using AES key
+  const decryptedPayload = await decryptAES(
+    aesKey,
+    encryptedData.encrypted_payload,
+    encryptedData.iv
+  );
+  const txn = JSON.parse(decryptedPayload);
+  
+  await logEvent({
+    actor: 'receiver',
+    action: 'decrypt_payload',
+    txn_id: txn.txn_id,
+    status: 'success',
+    connectivity: 'offline',
+    details: { message: 'Transaction payload decrypted' }
+  });
+  
+  // Step 3: Recompute transaction hash
+  const canonical = canonicalTransactionString(txn);
+  const expectedHash = await sha256Hex(canonical);
+  
+  if (expectedHash !== txn.hash) {
+    throw new Error('Transaction hash mismatch after decryption');
+  }
+  
+  // Step 4: Verify Sender signature using Sender public key
+  const senderPublicKey = await crypto.subtle.importKey(
+    'jwk',
+    txn.sender_public_key,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify']
+  );
+  
+  const verified = await verifySignature(txn.hash, txn.signature, senderPublicKey);
   if (!verified) {
     await logEvent({
       actor: 'receiver',
-      action: 'import_txn',
+      action: 'verify_signature',
       txn_id: txn.txn_id,
       status: 'error',
       connectivity: 'offline',
@@ -63,7 +217,17 @@ async function handleTransaction(txn) {
     });
     throw new Error('Signature verification failed');
   }
-
+  
+  await logEvent({
+    actor: 'receiver',
+    action: 'verify_signature',
+    txn_id: txn.txn_id,
+    status: 'success',
+    connectivity: 'offline',
+    details: { message: 'Signature verified successfully' }
+  });
+  
+  // Step 5: Append to ledger
   const entry = await appendLedger(txn);
   await logEvent({
     actor: 'receiver',
@@ -76,35 +240,120 @@ async function handleTransaction(txn) {
   await renderLedger();
 }
 
-function validateTxnShape(txn) {
-  const required = ['txn_id', 'from_id', 'to_id', 'amount', 'timestamp', 'prev_hash', 'hash', 'signature', 'sender_public_key'];
-  for (const key of required) {
-    if (txn[key] === undefined || txn[key] === null) {
-      throw new Error(`Transaction missing field: ${key}`);
-    }
-  }
+async function ensureIdentity() {
+  await generateAndStoreKeys(false);
+  identityDiv.innerHTML = `
+    <div><strong>Receiver ID:</strong> ${localStorage.getItem('receiver_id') || 'Not set'}</div>
+    <div class="small muted">ECDSA P-256 keypair for signing; ECDH keypair for decryption.</div>
+  `;
 }
 
-async function verifyTransactionSignature(txn) {
-  const canonical = canonicalTransactionString(txn);
-  const expectedHash = await sha256Hex(canonical);
-  if (expectedHash !== txn.hash) return false;
+async function generateAndStoreKeys(force) {
+  if (cachedKeyPair && !force) return cachedKeyPair;
+  const stored = localStorage.getItem('receiver_keys');
+  if (stored && !force) {
+    const { privateJwk, publicJwk } = JSON.parse(stored);
+    cachedKeyPair = await importKeyPair(privateJwk, publicJwk);
+    cachedPublicJwk = publicJwk;
+    await ensureECDHKeyPair();
+    return cachedKeyPair;
+  }
+  
+  const receiverId = localStorage.getItem('receiver_id') || crypto.randomUUID();
+  localStorage.setItem('receiver_id', receiverId);
+  
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify']
+  );
+  const privateJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+  const publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  localStorage.setItem('receiver_keys', JSON.stringify({ privateJwk, publicJwk }));
+  cachedKeyPair = keyPair;
+  cachedPublicJwk = publicJwk;
+  await ensureECDHKeyPair();
+  return keyPair;
+}
 
+async function importKeyPair(privateJwk, publicJwk) {
+  const privateKey = await crypto.subtle.importKey(
+    'jwk',
+    privateJwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  );
   const publicKey = await crypto.subtle.importKey(
     'jwk',
-    txn.sender_public_key,
+    publicJwk,
     { name: 'ECDSA', namedCurve: 'P-256' },
     true,
     ['verify']
   );
-  const sigBuffer = base64ToBuffer(txn.signature);
-  const verified = await crypto.subtle.verify(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    publicKey,
-    sigBuffer,
-    hexToBuffer(txn.hash)
+  return { privateKey, publicKey };
+}
+
+async function ensureECDHKeyPair() {
+  if (cachedECDHKeyPair && cachedECDHPublicJwk) return cachedECDHKeyPair;
+  const stored = localStorage.getItem('receiver_ecdh_keys');
+  if (stored) {
+    const keyData = JSON.parse(stored);
+    const privateJwk = keyData.privateJwk;
+    const publicJwk = keyData.publicJwk;
+    
+    // If public key is missing, regenerate keys
+    if (!publicJwk) {
+      console.warn('ECDH public key missing, regenerating...');
+      const ecdhKeyPair = await crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' },
+        true,
+        ['deriveKey', 'deriveBits']
+      );
+      const newPrivateJwk = await crypto.subtle.exportKey('jwk', ecdhKeyPair.privateKey);
+      const newPublicJwk = await crypto.subtle.exportKey('jwk', ecdhKeyPair.publicKey);
+      localStorage.setItem('receiver_ecdh_keys', JSON.stringify({ privateJwk: newPrivateJwk, publicJwk: newPublicJwk }));
+      cachedECDHKeyPair = { privateKey: ecdhKeyPair.privateKey };
+      cachedECDHPublicJwk = newPublicJwk;
+      return cachedECDHKeyPair;
+    }
+    
+    const privateKey = await crypto.subtle.importKey(
+      'jwk',
+      privateJwk,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveKey', 'deriveBits']
+    );
+    cachedECDHKeyPair = { privateKey };
+    cachedECDHPublicJwk = publicJwk;
+    return cachedECDHKeyPair;
+  }
+  const ecdhKeyPair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveKey', 'deriveBits']
   );
-  return verified;
+  const privateJwk = await crypto.subtle.exportKey('jwk', ecdhKeyPair.privateKey);
+  const publicJwk = await crypto.subtle.exportKey('jwk', ecdhKeyPair.publicKey);
+  localStorage.setItem('receiver_ecdh_keys', JSON.stringify({ privateJwk, publicJwk }));
+  cachedECDHKeyPair = { privateKey: ecdhKeyPair.privateKey };
+  cachedECDHPublicJwk = publicJwk;
+  return cachedECDHKeyPair;
+}
+
+async function loadBankPublicKey() {
+  const stored = localStorage.getItem('bank_public_key');
+  if (stored) {
+    try {
+      bankPublicKeyJwk = JSON.parse(stored);
+      bankKeyTextarea.value = stored;
+      bankKeyStatus.textContent = '✓ Bank public key loaded';
+      bankKeyStatus.style.color = 'green';
+    } catch (e) {
+      // Invalid stored key
+    }
+  }
 }
 
 function canonicalTransactionString(txn) {
@@ -158,7 +407,12 @@ async function renderLedger() {
       : `<pre>${JSON.stringify(rows, null, 2)}</pre>`;
 }
 
-async function exportLedger() {
+async function exportEncryptedLedger() {
+  if (!bankPublicKeyJwk) {
+    alert('Please import bank public key first');
+    return;
+  }
+  
   const db = await openDb();
   const tx = db.transaction(LEDGER_STORE, 'readonly');
   const store = tx.objectStore(LEDGER_STORE);
@@ -167,7 +421,79 @@ async function exportLedger() {
     alert('Ledger is empty');
     return;
   }
-  downloadJSON('receiver-ledger.json', rows);
+  
+  try {
+    // Step 1: Compute SHA-256 hash of ledger
+    const ledgerJson = JSON.stringify(rows);
+    const ledgerHash = await sha256Hex(ledgerJson);
+    
+    // Step 2: Sign ledger hash using Receiver private key (ECDSA)
+    const { privateKey } = await generateAndStoreKeys(false);
+    const signature = await signHash(ledgerHash, privateKey);
+    
+    // Create signed payload
+    const signedPayload = {
+      ledger: rows,
+      hash: ledgerHash,
+      signature: signature,
+      receiver_public_key: cachedPublicJwk
+    };
+    
+    await logEvent({
+      actor: 'receiver',
+      action: 'sign_ledger',
+      status: 'success',
+      connectivity: 'offline',
+      details: { message: 'Ledger signed successfully' }
+    });
+    
+    // Step 3: Encrypt signed ledger using AES-256-GCM
+    const aesKey = await generateAESKey();
+    const { encrypted: encryptedPayload, iv } = await encryptAES(aesKey, signedPayload);
+    
+    // Step 4: Encrypt AES key using Bank public key (ECDH)
+    const { privateKey: ecdhPrivateKey } = await ensureECDHKeyPair();
+    const encryptedAESKey = await encryptAESKeyWithPublicKey(
+      aesKey,
+      bankPublicKeyJwk,
+      ecdhPrivateKey
+    );
+    
+    // Step 5: Export encrypted ledger file
+    // Ensure ECDH public key is available
+    if (!cachedECDHPublicJwk) {
+      await ensureECDHKeyPair();
+      if (!cachedECDHPublicJwk) {
+        throw new Error('ECDH public key not available for export');
+      }
+    }
+    
+    const encryptedLedger = {
+      encrypted_payload: encryptedPayload,
+      encrypted_aes_key: encryptedAESKey,
+      iv: iv,
+      receiver_public_key: cachedECDHPublicJwk // ECDH public key for key exchange (Bank needs this!)
+    };
+    
+    downloadJSON(`encrypted-ledger-${Date.now()}.json`, encryptedLedger);
+    
+    await logEvent({
+      actor: 'receiver',
+      action: 'export_encrypted_ledger',
+      status: 'success',
+      connectivity: 'offline',
+      details: { message: 'Ledger encrypted and exported successfully' }
+    });
+  } catch (err) {
+    alert('Error exporting ledger: ' + err.message);
+    await logEvent({
+      actor: 'receiver',
+      action: 'export_encrypted_ledger',
+      status: 'error',
+      connectivity: 'offline',
+      details: { message: err.message }
+    });
+  }
 }
 
 async function renderLogs() {
@@ -223,31 +549,7 @@ function openDb() {
   });
 }
 
-async function sha256Hex(str) {
-  const data = new TextEncoder().encode(str);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return bufferToHex(hash);
-}
-
-function bufferToHex(buffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-function hexToBuffer(hex) {
-  const bytes = new Uint8Array(hex.match(/.{1,2}/g).map((byte) => parseInt(byte, 16)));
-  return bytes.buffer;
-}
-
-function base64ToBuffer(b64) {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
+// Crypto functions moved to crypto-utils.js
 
 function downloadJSON(filename, data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

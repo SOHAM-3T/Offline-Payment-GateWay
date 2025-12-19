@@ -16,7 +16,22 @@
       </header>
 
       <section class="card">
-        <h2>Import Transaction File</h2>
+        <h2>Device Identity</h2>
+        <div id="identity"></div>
+        <button id="regenerate-keys">Regenerate keypair</button>
+        <button id="export-public-key">Export Public Key (for Sender)</button>
+      </section>
+
+      <section class="card">
+        <h2>Bank Public Key</h2>
+        <p class="small muted">Import bank's public key (JWK format) for ledger encryption</p>
+        <textarea id="bank-public-key" placeholder='{"kty":"EC","crv":"P-256",...}' rows="4" style="width: 100%; font-family: monospace; font-size: 0.9em;"></textarea>
+        <button id="save-bank-key">Save Bank Public Key</button>
+        <div id="bank-key-status" class="small muted"></div>
+      </section>
+
+      <section class="card">
+        <h2>Import Encrypted Transaction File</h2>
         <input id="file-input" type="file" accept="application/json" />
         <div id="import-status" class="small muted"></div>
       </section>
@@ -24,7 +39,7 @@
       <section class="card">
         <h2>Ledger (IndexedDB)</h2>
         <div id="ledger-view"></div>
-        <button id="export-ledger">Export ledger JSON</button>
+        <button id="export-ledger">Export encrypted ledger JSON</button>
       </section>
 
       <section class="card">
@@ -35,6 +50,7 @@
     </main>
 
     <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/crypto-utils.js"></script>
   </body>
 </html>
 
