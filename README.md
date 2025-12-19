@@ -5,37 +5,82 @@ Hackathon-grade simulation that demonstrates offline sender → receiver payment
 ## Project layout
 - `sender/` – Vite web app for Buyer. Generates device identity, signs transactions, exports signed JSON files, writes logs to IndexedDB.
 - `receiver/` – Vite web app for Merchant. Imports signed transactions, verifies signatures, appends to an immutable hash-chained ledger in IndexedDB, exports ledger JSON, writes logs to IndexedDB.
-- `bank/` – Node + Express service. Imports ledger JSON, verifies hash-chain and signatures, records settlement audit logs to PostgreSQL (or local JSONL fallback).
+- `bank/` – Python + FastAPI service. Imports ledger JSON, verifies hash-chain and signatures, records settlement audit logs to PostgreSQL.
 - `schema.sql` – SQL to bootstrap the bank audit table.
 
 ## Prereqs
-- Node 18+ (for Web Crypto + ES modules)
-- npm
-- PostgreSQL (optional; required for persistent bank audit logs)
+- Node 18+ (for frontend Web Crypto + ES modules)
+- npm (for frontend apps)
+- Python 3.9+ (for bank backend)
+- PostgreSQL (required for bank audit logs)
 
 ## Quickstart (dev)
-1) Install deps (per actor):
+
+### 1. Setup PostgreSQL Database
+
+Create database and apply schema:
+
+```bash
+# Create database
+psql -U postgres -h localhost -p 5432 -c "CREATE DATABASE offline_payments;"
+
+# Apply schema
+psql -U postgres -h localhost -p 5432 -d offline_payments -f schema.sql
+```
+
+### 2. Install Dependencies
+
+**Frontend apps (Sender & Receiver):**
 ```bash
 cd sender && npm install
 cd ../receiver && npm install
-cd ../bank && npm install
 ```
-2) Run sender UI (offline-friendly):
+
+**Bank backend (Python):**
+```bash
+cd bank
+python -m venv venv
+
+# On Windows:
+venv\Scripts\activate
+# On Linux/Mac:
+# source venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+### 3. Configure Bank Service
+
+```bash
+cd bank
+cp env.sample .env
+# Edit .env and set DATABASE_URL:
+# DATABASE_URL=postgres://postgres:YOUR_PASSWORD@localhost:5432/offline_payments
+```
+
+### 4. Run All Services
+
+**Terminal 1 - Sender UI:**
 ```bash
 cd sender
 npm run dev -- --host --port 4173
 ```
-3) Run receiver UI:
+Open: `http://localhost:4173`
+
+**Terminal 2 - Receiver UI:**
 ```bash
 cd receiver
 npm run dev -- --host --port 4174
 ```
-4) Run bank API:
+Open: `http://localhost:4174`
+
+**Terminal 3 - Bank API:**
 ```bash
 cd bank
-cp env.sample .env   # set DATABASE_URL if available
-npm run dev
+venv\Scripts\activate  # Windows (or: source venv/bin/activate on Linux/Mac)
+python -m uvicorn src.main:app --reload --port 4000
 ```
+API available at: `http://localhost:4000`
 
 ## Demo flow (offline → online)
 1) Sender (offline):
@@ -48,16 +93,30 @@ npm run dev
    - App verifies signature, appends immutable ledger entry (hash-chained), logs result.
    - Export ledger JSON file.
 3) Bank (online):
-   - Send ledger JSON to the bank endpoint:
+   - **Verify ledger** (check integrity without settling):
 ```bash
-curl -X POST http://localhost:4000/ledger/import \
+curl -X POST http://localhost:4000/verify-ledger \
   -H "Content-Type: application/json" \
-  --data-binary @path/to/ledger.json
+  -d @path/to/ledger.json
 ```
-   - Bank verifies hash-chain + signatures, writes audit log to PostgreSQL (or JSONL fallback), returns settlement report.
+   - **Settle ledger** (verify and record settlement):
+```bash
+curl -X POST http://localhost:4000/settle-ledger \
+  -H "Content-Type: application/json" \
+  -d @path/to/ledger.json
+```
+   - Bank verifies hash-chain + signatures, checks for duplicates/replays, writes audit logs to PostgreSQL, returns settlement report.
 4) Audit visibility:
-   - Sender/Receiver: open each UI “Logs” tab (reads IndexedDB).
-   - Bank: query Postgres `audit_logs` or check `bank/audit-log.jsonl` when DB is absent.
+   - **Sender/Receiver**: Open each UI "Logs" tab (reads IndexedDB).
+   - **Bank**: Query audit logs via API:
+```bash
+curl http://localhost:4000/bank-logs?limit=50
+```
+   - Or query PostgreSQL directly:
+```bash
+psql -U postgres -h localhost -p 5432 -d offline_payments \
+  -c "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 20;"
+```
 
 ## Data shapes (canonical order)
 Transaction
