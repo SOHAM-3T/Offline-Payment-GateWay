@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateBalance();
   renderTransactions();
   await checkReceiverKey();
-  
+
   // Check if user is registered
   if (!userInfo) {
     alert('Please register first');
@@ -49,13 +49,19 @@ async function loadUserData() {
 
 async function refreshWalletInfo() {
   if (!userInfo || !userInfo.wallet_id) return;
-  
+
   try {
     const response = await fetch(`${getBankApiUrl()}/wallets/${userInfo.wallet_id}`);
     if (response.ok) {
       const wallet = await response.json();
       walletInfo = wallet;
       updateBalance();
+    } else {
+      console.error('Wallet fetch failed:', response.status, response.statusText);
+      try {
+        const txt = await response.text();
+        console.error('Response:', txt);
+      } catch (err) { /* ignore read error */ }
     }
   } catch (e) {
     console.error('Failed to refresh wallet:', e);
@@ -65,14 +71,14 @@ async function refreshWalletInfo() {
 async function loadKeys() {
   const stored = localStorage.getItem('sender_keys');
   const ecdhStored = localStorage.getItem('sender_ecdh_keys');
-  
+
   if (stored && ecdhStored) {
     const { privateJwk, publicJwk } = JSON.parse(stored);
     const ecdhData = JSON.parse(ecdhStored);
-    
+
     cachedKeyPair = await importKeyPair(privateJwk, publicJwk);
     cachedPublicJwk = publicJwk;
-    
+
     const ecdhPrivateKey = await crypto.subtle.importKey(
       'jwk',
       ecdhData.privateJwk,
@@ -129,22 +135,22 @@ function setupEventHandlers() {
     e.preventDefault();
     await createPayment();
   });
-  
+
   document.getElementById('close-qr').addEventListener('click', () => {
     document.getElementById('qr-modal').classList.add('hidden');
   });
-  
+
   document.getElementById('download-qr-btn').addEventListener('click', () => {
     downloadTransactionFile();
   });
-  
+
   // Close modal on overlay click
   document.getElementById('qr-modal').addEventListener('click', (e) => {
     if (e.target.id === 'qr-modal') {
       document.getElementById('qr-modal').classList.add('hidden');
     }
   });
-  
+
   document.getElementById('save-receiver-key-btn').addEventListener('click', async () => {
     await saveReceiverKey();
   });
@@ -156,7 +162,7 @@ async function saveReceiverKey() {
     showStatus('receiver-key-status', 'Please enter receiver connection code', 'error');
     return;
   }
-  
+
   try {
     // Try parsing as JSON (full key) or as connection code
     let keyJwk;
@@ -167,7 +173,7 @@ async function saveReceiverKey() {
       // For now, assume it's JSON string that needs parsing
       throw new Error('Invalid connection code format');
     }
-    
+
     // Validate it's a valid ECDH public key
     const importedKey = await crypto.subtle.importKey(
       'jwk',
@@ -176,15 +182,15 @@ async function saveReceiverKey() {
       false,
       []
     );
-    
+
     if (keyJwk.kty !== 'EC' || keyJwk.crv !== 'P-256') {
       throw new Error('Invalid connection code');
     }
-    
+
     receiverPublicKeyJwk = keyJwk;
     localStorage.setItem('receiver_public_key', JSON.stringify(keyJwk));
     showStatus('receiver-key-status', '✓ Connected successfully!', 'success');
-    
+
     // Hide config card after successful connection
     setTimeout(() => {
       document.getElementById('config-card').classList.add('hidden');
@@ -214,36 +220,36 @@ async function createPayment() {
     showMessage('Please configure receiver public key first', 'error');
     return;
   }
-  
+
   const receiverId = document.getElementById('receiver-id').value.trim();
   const amount = parseFloat(document.getElementById('amount').value);
-  
+
   if (!receiverId || !amount || amount <= 0) {
     showMessage('Please enter valid receiver ID and amount', 'error');
     return;
   }
-  
+
   if (!walletInfo || walletInfo.current_balance < amount) {
     showMessage(`Insufficient balance. Available: ₹${walletInfo?.current_balance || 0}`, 'error');
     return;
   }
-  
+
   const btn = document.getElementById('create-payment-btn');
   btn.disabled = true;
   btn.textContent = 'Creating...';
-  
+
   try {
     const encryptedTxn = await createEncryptedSignedTransaction({
       toId: receiverId,
       amount: amount,
       walletId: walletInfo.wallet_id
     });
-    
+
     // Update local balance
     walletInfo.current_balance -= amount;
     walletInfo.used_amount = (walletInfo.used_amount || 0) + amount;
     updateBalance();
-    
+
     // Store transaction
     const txn = {
       id: encryptedTxn.txn_id || crypto.randomUUID(),
@@ -256,19 +262,19 @@ async function createPayment() {
     transactions.unshift(txn);
     saveTransactions();
     renderTransactions();
-    
+
     // Store encrypted transaction for download
     lastEncryptedTxn = encryptedTxn;
-    
+
     // Show success message
     showMessage('Payment created successfully!', 'success');
-    
+
     // Show QR code (but don't block if it fails)
     showQRCode(encryptedTxn);
-    
+
     // Clear form
     document.getElementById('payment-form').reset();
-    
+
   } catch (err) {
     showMessage('Error: ' + err.message, 'error');
   } finally {
@@ -343,22 +349,23 @@ function showQRCode(encryptedTxn) {
   const qrModal = document.getElementById('qr-modal');
   const qrDiv = document.getElementById('qrcode');
   const qrError = document.getElementById('qr-error');
-  
+
   // Store for download
   lastEncryptedTxn = encryptedTxn;
-  
+
   // Show modal immediately
   qrModal.classList.remove('hidden');
   qrError.style.display = 'none';
-  
+
   // Check data size first
   const qrData = JSON.stringify(encryptedTxn);
   const dataSize = qrData.length;
   console.log('Transaction data size:', dataSize, 'characters');
-  
+
   // QR codes have practical limits - encrypted data is usually too large
   // Most QR codes max out around 2000-3000 characters
-  if (dataSize > 2000) {
+  // Level L 40 allows ~2953 bytes.
+  if (dataSize > 2900) {
     // Data too large - show download option immediately (no empty space!)
     qrDiv.innerHTML = `
       <div style="padding: 40px; text-align: center;">
@@ -372,10 +379,10 @@ function showQRCode(encryptedTxn) {
     `;
     return;
   }
-  
+
   // Show loading state
   qrDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;"><div style="font-size: 48px; margin-bottom: 10px;">⏳</div><div>Generating QR code...</div></div>';
-  
+
   // Function to generate QR code
   const generateQR = () => {
     // Check if QRCode library is available
@@ -392,14 +399,14 @@ function showQRCode(encryptedTxn) {
       `;
       return;
     }
-    
+
     // Clear loading and create canvas
     qrDiv.innerHTML = '';
     const canvas = document.createElement('canvas');
     canvas.style.display = 'block';
     canvas.style.margin = '0 auto';
     qrDiv.appendChild(canvas);
-    
+
     // Generate QR code
     QRCode.toCanvas(canvas, qrData, {
       width: 280,
@@ -408,7 +415,7 @@ function showQRCode(encryptedTxn) {
         dark: '#000000',
         light: '#ffffff'
       },
-      errorCorrectionLevel: 'H'
+      errorCorrectionLevel: 'L'
     }, (error) => {
       if (error) {
         console.error('QR Code error:', error);
@@ -429,21 +436,32 @@ function showQRCode(encryptedTxn) {
       }
     });
   };
-  
+
   // Try to generate immediately
   if (typeof QRCode !== 'undefined') {
     generateQR();
   } else {
     // Wait a bit for library to load
-    setTimeout(() => {
-      generateQR();
-    }, 300);
+    let attempts = 0;
+    const checkLibrary = () => {
+      if (typeof QRCode !== 'undefined') {
+        generateQR();
+      } else if (attempts < 10) {
+        attempts++;
+        setTimeout(checkLibrary, 500);
+      } else {
+        // Final attempt failed
+        generateQR();
+      }
+    };
+    checkLibrary();
   }
 }
 
 function updateBalance() {
-  const balance = walletInfo?.current_balance || 0;
-  document.getElementById('balance-display').textContent = `₹${balance.toFixed(2)}`;
+  // Fallback to locally stored amount if server fetch hasn't succeeded yet
+  const balance = walletInfo?.current_balance ?? userInfo?.wallet_amount ?? 0;
+  document.getElementById('balance-display').textContent = `₹${Number(balance).toFixed(2)}`;
 }
 
 function showMessage(text, type) {
@@ -477,7 +495,7 @@ function downloadTransactionFile() {
       return;
     }
   }
-  
+
   try {
     const fileName = `payment-${Date.now()}.json`;
     const blob = new Blob([JSON.stringify(lastEncryptedTxn, null, 2)], { type: 'application/json' });
@@ -489,7 +507,7 @@ function downloadTransactionFile() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
+
     // Show success message
     const msgDiv = document.getElementById('payment-message');
     msgDiv.textContent = '✅ Payment file downloaded! Share this file with the receiver.';
@@ -517,7 +535,7 @@ function renderTransactions() {
     `;
     return;
   }
-  
+
   listDiv.innerHTML = transactions.slice(0, 10).map(txn => `
     <div class="transaction-item">
       <div class="transaction-icon">💸</div>
