@@ -2,7 +2,9 @@
 # Database setup script for Linux/Mac
 # Update the password below with your PostgreSQL password
 
-export PGPASSWORD=Soham
+read -s -p "Enter PostgreSQL Password: " PGPASSWORD
+export PGPASSWORD
+echo ""
 DB_NAME=payment_gateway
 DB_USER=soham
 
@@ -20,7 +22,7 @@ if [ $? -eq 0 ]; then
         echo "Database setup complete!"
         echo ""
         echo "Update bank/.env file with:"
-        echo "DATABASE_URL=postgresql://$DB_USER:Soham@localhost:5432/$DB_NAME"
+        echo "DATABASE_URL=postgresql://$DB_USER:$PGPASSWORD@localhost:5432/$DB_NAME"
     else
         echo "Error running schema"
     fi

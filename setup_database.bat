@@ -2,7 +2,7 @@
 REM Database setup script for Windows
 REM Update the password below with your PostgreSQL password
 
-set PGPASSWORD=Soham
+set /p PGPASSWORD="Enter PostgreSQL Password: "
 set DB_NAME=payment_gateway
 set DB_USER=soham
 
@@ -20,7 +20,7 @@ if %ERRORLEVEL% EQU 0 (
         echo Database setup complete!
         echo.
         echo Update bank/.env file with:
-        echo DATABASE_URL=postgresql://%DB_USER%:Soham@localhost:5432/%DB_NAME%
+        echo DATABASE_URL=postgresql://%DB_USER%:%PGPASSWORD%@localhost:5432/%DB_NAME%
     ) else (
         echo Error running schema
     )
