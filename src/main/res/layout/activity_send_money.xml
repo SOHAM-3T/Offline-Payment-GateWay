@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#E8F5E9"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Offline Vault"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#2E7D32"
+        android:layout_marginBottom="24dp"/>
+
+    <androidx.cardview.widget.CardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="8dp"
+        app:cardBackgroundColor="#4CAF50"
+        xmlns:app="http://schemas.android.com/apk/res-auto">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="24dp"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LOCKED FOR OFFLINE"
+                android:textColor="#C8E6C9"
+                android:textSize="12sp"
+                android:letterSpacing="0.1"/>
+
+            <TextView
+                android:id="@+id/tvOfflineBalance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="₹ 0.0"
+                android:textColor="#FFFFFF"
+                android:textSize="40sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Manage Funds"
+        android:textColor="#757575"
+        android:layout_marginBottom="8dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <EditText
+            android:id="@+id/etLoadAmount"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_weight="1"
+            android:hint="Amount (e.g. 500)"
+            android:inputType="numberDecimal"
+            android:background="@android:drawable/edit_text"
+            android:paddingStart="12dp"/>
+
+        <Button
+            android:id="@+id/btnLockMoney"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:text="LOCK FUNDS"
+            android:backgroundTint="#2E7D32"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btnRestoreMoney"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Un-Lock (Restore to Bank)"
+        android:textColor="#2E7D32"
+        android:backgroundTint="#FFFFFF"
+        style="?android:attr/borderlessButtonStyle"
+        android:layout_marginBottom="32dp"/>
+
+    <LinearLayout
+        android:id="@+id/layoutActions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/btnPayNearby"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="📡 Pay Nearby (Bluetooth)"
+            android:backgroundTint="#2E7D32"
+            android:textSize="16sp"
+            android:layout_marginBottom="12dp"/>
+
+        <Button
+            android:id="@+id/btnReceive"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="⬇ Receive Money"
+            android:backgroundTint="#66BB6A"
+            android:textSize="16sp"/>
+    </LinearLayout>
+
+</LinearLayout>
